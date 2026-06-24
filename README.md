@@ -8,6 +8,12 @@ pip install -r requirements.txt
 ```
 
 ## Configuring
+**Через devtools:**
+Откройте `web.max.ru`, войдите в свой аккаунт, откройте devTools->`Storage`->`Local Storage`:
+![img](img/img1.png)
+Скопируйте значение `__oneme_auth` и запишите его в `.env` как `ONEME_AUTH` в одиночных кавыках, скопируйте `__oneme_device_id` и запишите как `ONEME_DEVICE_ID` можно без кавычек.
+
+**Автоматически:**
 Чтоб вообще не париться можете запустить это в `tampermonkey`:
 ```js
 // ==UserScript==

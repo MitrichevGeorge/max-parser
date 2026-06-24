@@ -1,26 +1,8 @@
 import asyncio
 import json
 import websockets
-from datetime import datetime
-from pydantic import Field, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
-class Settings(BaseSettings):
-    ONEME_DEVICE_ID: str = Field(default="q")
-    ONEME_AUTH: dict = Field(default_factory=dict)
-
-    model_config = SettingsConfigDict(
-        env_file=".env", 
-        env_file_encoding="utf-8"
-    )
-
-    @model_validator(mode="after")
-    def check_required_fields(self):
-        if self.ONEME_DEVICE_ID == "q" or not self.ONEME_AUTH.get("token"):
-            raise ValueError("Pls check .env")
-        return self
-
-stg = Settings()
+from classes import UserProfile, Chat
+from settings import stg
 
 async def send_messages(websocket):
     try:
@@ -75,7 +57,16 @@ async def main():
             await websocket.send('{"ver":11,"cmd":0,"seq":1,"opcode":19,"payload":{"token":"' + stg.ONEME_AUTH["token"] + '","chatsCount":40,"interactive":true,"chatsSync":0,"contactsSync":0,"presenceSync":-1,"draftsSync":0}}')
             await websocket.recv()
             data = json.loads(await websocket.recv())['payload']
-            print(f'Name: {data['profile']['contact']['names'][0]['name']} [{data['profile']['contact']['country']}]\nID: {data['profile']['contact']['id']}\nPhone: +{data['profile']['contact']['phone']}')
+            print("You:")
+            me = UserProfile(**data['profile']['contact'])
+            me.info()
+            print("Contacts:")
+            for i in data['contacts']:
+                UserProfile(**i).info(1)
+            print("Chats:")
+            for i in data['chats']:
+                Chat(**i).info(1)
+
             # with open("q.json","w") as f:
             #     print(await websocket.recv(), file=f)
             #     f.close()
