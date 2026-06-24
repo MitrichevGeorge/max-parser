@@ -1,6 +1,4 @@
-import json
-
-URL = "wss://ws-api.oneme.ru/websocket"
+URL = "wss://api.oneme.ru/websocket"
 HEADERS = {
     "Host": "ws-api.oneme.ru",
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:150.0) Gecko/20100101 Firefox/150.0",
@@ -28,38 +26,24 @@ DEFAULT_USER_AGENT = {
     "osVersion": "Linux",
     "deviceName": "Firefox",
     "headerUserAgent": "Mozilla/5.0 (X11; Linux x86_64; rv:150.0) Gecko/20100101 Firefox/150.0",
-    "appVersion": "26.6.19",
+    "appVersion": "26.6.20",
     "screen": "1200x1920 1.0x",
     "timezone": "Europe/Moscow"
 }
 
-def get_device_payload(device_id: str) -> str:
-    data = {
-        "ver": 11,
-        "cmd": 0,
-        "seq": 0,
-        "opcode": 6,
-        "payload": {
-            "userAgent": DEFAULT_USER_AGENT,
-            "deviceId": device_id
-        }
+def get_device_payload(device_id: str) -> dict:
+    return {
+        "userAgent": DEFAULT_USER_AGENT,
+        "deviceId": device_id
     }
-    return json.dumps(data)
 
-def get_auth_payload(token: str, chats_count: int = 60) -> str:
-    data = {
-        "ver": 11,
-        "cmd": 0,
-        "seq": 1,
-        "opcode": 19,
-        "payload": {
-            "token": token,
-            "chatsCount": chats_count,
-            "interactive": True,
-            "chatsSync": 0,
-            "contactsSync": 0,
-            "presenceSync": -1,
-            "draftsSync": 0
-        }
+def get_auth_payload(token: str, chats_count: int = 60) -> dict:
+    return {
+        "token": token,
+        "chatsCount": chats_count,
+        "interactive": True,
+        "chatsSync": 0,
+        "contactsSync": 0,
+        "presenceSync": -1,
+        "draftsSync": 0
     }
-    return json.dumps(data)

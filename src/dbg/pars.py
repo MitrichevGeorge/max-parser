@@ -1,10 +1,5 @@
 import base64
 import msgpack
-
-b = base64.b64decode("CgEACQAbAgAA7PgohKRzeW5jxwkB0wAAAZ76oJvOqHNlY3Rpb25zkoekdHlwZaxTVElDS0VSX1NFVFOiaWSwTkVXXxQA8garc3RpY2tlclNldHOVxwUB0gADTk4IABJXCAAiAJAIACMDOAgA00xOpXRpdGxlsU5ldyA/APEcIHBhY2tzpm1hcmtlcscBAQWqdG90YWxDb3VudNEBEqljb2xsYXBzZWTDhZgAYadSRUNFTpMAEqYLAPUEqWVtb2ppTGlzdJCvcmVjZW50RREAEqsRABJzHgADcwCkc1VwZGF0ZXOArREAaE9yZGVykeMAUF9TRVRT")
-print(b)
-
-import msgpack
 import lz4.block
 import struct
 
@@ -60,4 +55,6 @@ def parse_packet(buf):
         "payload": payload_obj
     }
 
-print(parse_packet(b))
+
+while True:
+    print(parse_packet(base64.b64decode(input())))
