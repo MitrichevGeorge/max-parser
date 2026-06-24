@@ -6,6 +6,10 @@ from settings import stg
 import payloads as pl
 
 class Client:
+    profile: UserProfile
+    contacts: list
+    chats: list
+
     def __init__(self) -> None:
         self.connection = None
 
@@ -16,24 +20,27 @@ class Client:
         await self.connection.send(pl.get_auth_payload(stg.ONEME_AUTH["token"]))
         await self.connection.recv()
         data = json.loads(await self.connection.recv())['payload']
-        print("You:")
-        me = UserProfile(**data['profile']['contact'])
-        me.info()
-        print("Contacts:")
-        for i in data['contacts']:
-            UserProfile(**i).info(1)
-        print("Chats:")
-        for i in data['chats']:
-            Chat(**i).info(1)
+        self.profile = UserProfile(**data['profile']['contact'])
+        self.contacts = [UserProfile(**i) for i in data['contacts']]
+        self.chats = [Chat(**i) for i in data['chats']]
 
     async def disconnect(self):
         if self.connection:
             await self.connection.close()
             print(f"Connection to {pl.URL} closed")
 
+    def info(self):
+        print("You:")
+        self.profile.info(1)
+        print("Contacts:")
+        [i.info(1) for i in self.contacts]
+        print("Chats:")
+        [i.info(1) for i in self.chats]
+
 async def main():
     q = Client()
     await q.connect()
+    q.info()
     await q.disconnect()
 
 if __name__ == "__main__":
