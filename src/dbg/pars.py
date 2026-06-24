@@ -55,6 +55,8 @@ def parse_packet(buf):
         "payload": payload_obj
     }
 
+def main():
+    while True:
+        print(parse_packet(base64.b64decode(input("\nB64: "))))
 
-while True:
-    print(parse_packet(base64.b64decode(input())))
+if __name__ == "__main__": main()
