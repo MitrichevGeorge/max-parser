@@ -3,3 +3,4 @@ env/
 *.pyc
 src/w.json
 src/w2.json
+logs/

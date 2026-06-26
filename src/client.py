@@ -8,6 +8,9 @@ from convert import PacketCodec
 import base64
 from typing import Any
 from operator import itemgetter
+from collections import defaultdict
+import traceback
+
 
 class UniversalEncoder(json.JSONEncoder):
     def default(self, o: Any):
@@ -27,6 +30,7 @@ class Client:
     def __init__(self) -> None:
         self.connection = None
         self.codec = PacketCodec()
+        self._listeners = defaultdict(list)
 
     async def _recv(self):
         if not isinstance(self.connection, websockets.ClientConnection):
@@ -36,16 +40,62 @@ class Client:
             raise ValueError("It is not bytes")
         return self.codec.bytes_to_payload(raw)
 
+    async def _send(self, opcode: int, payload):
+        if not isinstance(self.connection, websockets.ClientConnection):
+            raise RuntimeError("Client not connected")
+        await self.connection.send(self.codec.payload_to_bytes(opcode, payload))
+
     async def connect(self):
         self.connection = await websockets.connect(pl.URL, additional_headers=pl.HEADERS)
         print(f"Successfully connected to {pl.URL}")
-        await self.connection.send(self.codec.payload_to_bytes(6, pl.get_device_payload(stg.ONEME_DEVICE_ID)))
-        await self.connection.send(self.codec.payload_to_bytes(19, pl.get_auth_payload(stg.ONEME_AUTH["token"])))
+        await self._send(6, pl.get_device_payload(stg.ONEME_DEVICE_ID))
+        await self._send(19, pl.get_auth_payload(stg.ONEME_AUTH["token"]))
         await self.connection.recv()
         data = (await self._recv())['payload']
         self.profile = UserProfile(**data['profile']['contact'])
         self.contacts = [UserProfile(**i) for i in data['contacts']]
         self.chats = [Chat(**i) for i in data['chats']]
+        self._reader_task = asyncio.create_task(self._reader_loop())
+    
+    async def _reader_loop(self):
+        if not isinstance(self.connection, websockets.ClientConnection):
+            raise RuntimeError("Client not connected")
+        try:
+            print("reader loop started")
+            async for raw in self.connection:
+                try:
+                    if not isinstance(raw, bytes):
+                        print("It is not bytes")
+                        continue
+                    print(base64.b64encode(raw))
+                    msg = self.codec.bytes_to_payload(raw)
+                    if msg.get("cmd") == 1:
+                        opcode = msg.get("opcode")
+                        if opcode in self._listeners:
+                            for queue in list(self._listeners[opcode]):
+                                try:
+                                    queue.put_nowait(msg)
+                                except asyncio.QueueFull:
+                                    print(f"Queue for opcode {opcode} is full. Message dropped.")
+                except Exception:
+                    traceback.print_exc()
+                    continue
+        except asyncio.CancelledError:
+            pass
+        finally:
+            print("reader loop stopped")
+
+    async def wait_for_opcode(self, opcode):
+        queue = asyncio.Queue()
+        self._listeners[opcode].append(queue)
+        
+        try:
+            message = await queue.get()
+            return message
+        finally:
+            self._listeners[opcode].remove(queue)
+            if not self._listeners[opcode]:
+                del self._listeners[opcode]
 
     async def disconnect(self):
         if self.connection:
@@ -61,10 +111,8 @@ class Client:
         [i.info(1) for i in self.chats]
 
     async def search(self, query: str, count: int = 40):
-        if not isinstance(self.connection, websockets.ClientConnection):
-            raise RuntimeError("Client not connected")
-        await self.connection.send(self.codec.payload_to_bytes(68, {'query': query, 'count': count }))
-        response = await self._recv() # <- very bad idea. needs to fix
+        await self._send(68, {'query': query, 'count': count })
+        response = await self.wait_for_opcode(68)
         get_chats = itemgetter("chat")
         return list(map(get_chats, response["payload"]["result"]))
         # open("src/w2.json", "w").write(json.dumps(await self._recv(), cls=UniversalEncoder, indent=2))
@@ -73,7 +121,7 @@ async def main():
     q = Client()
     await q.connect()
     # q.info()
-    for i in await q.search("солнце"):
+    for i in await q.search("солнце", 2):
         Chat(**i).info()
     await q.disconnect()
 
