@@ -30,7 +30,10 @@ class Client:
     def __init__(self) -> None:
         self.connection = None
         self.codec = PacketCodec()
+        
         self._listeners = defaultdict(list)
+        self._tasks: set[asyncio.Task] = set()
+        self._semaphore = asyncio.Semaphore(32)
 
     async def _recv(self):
         if not isinstance(self.connection, websockets.ClientConnection):
@@ -56,6 +59,25 @@ class Client:
         self.contacts = [UserProfile(**i) for i in data['contacts']]
         self.chats = [Chat(**i) for i in data['chats']]
         self._reader_task = asyncio.create_task(self._reader_loop())
+
+    async def _process_message(self, raw):
+        async with self._semaphore:
+            try:
+                if not isinstance(raw, bytes):
+                    print("It is not bytes")
+                    return
+                print(base64.b64encode(raw))
+                msg = self.codec.bytes_to_payload(raw)
+                if msg.get("cmd") == 1:
+                    opcode = msg.get("opcode")
+                    if opcode in self._listeners:
+                        for queue in list(self._listeners[opcode]):
+                            try:
+                                queue.put_nowait(msg)
+                            except asyncio.QueueFull:
+                                print(f"Queue for opcode {opcode} is full. Message dropped.")
+            except Exception:
+                traceback.print_exc()
     
     async def _reader_loop(self):
         if not isinstance(self.connection, websockets.ClientConnection):
@@ -64,25 +86,18 @@ class Client:
             print("reader loop started")
             async for raw in self.connection:
                 try:
-                    if not isinstance(raw, bytes):
-                        print("It is not bytes")
-                        continue
-                    print(base64.b64encode(raw))
-                    msg = self.codec.bytes_to_payload(raw)
-                    if msg.get("cmd") == 1:
-                        opcode = msg.get("opcode")
-                        if opcode in self._listeners:
-                            for queue in list(self._listeners[opcode]):
-                                try:
-                                    queue.put_nowait(msg)
-                                except asyncio.QueueFull:
-                                    print(f"Queue for opcode {opcode} is full. Message dropped.")
+                    task = asyncio.create_task(self._process_message(raw))
+                    self._tasks.add(task)
+                    task.add_done_callback(self._tasks.discard)
                 except Exception:
                     traceback.print_exc()
                     continue
         except asyncio.CancelledError:
             pass
         finally:
+            if self._tasks:
+                print("finishing tasks")
+                await asyncio.gather(*self._tasks, return_exceptions=True)
             print("reader loop stopped")
 
     async def wait_for_opcode(self, opcode):
