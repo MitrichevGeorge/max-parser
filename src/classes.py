@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, Dict
 from pydantic import BaseModel, Field, field_validator
 
 class NameInfo(BaseModel):
@@ -43,25 +43,34 @@ class VideoConversation(BaseModel):
     callType: str
 
 class Chat(BaseModel):
-    participantsCount: Optional[int] = None
     access: Optional[str] = None
     invitedBy: Optional[int] = None
-    description: Optional[str] = None
-    type: str
-    title: Optional[str] = None
-    modified: datetime
-    id: int
     owner: int
-    joinTime: datetime
+
+    id: int
+    cid: Optional[int] = None
+    type: str
+    status: str
+
+    title: Optional[str] = None
+    description: Optional[str] = None
+
+    modified: datetime
+    joinTime: Optional[datetime] = None
     created: datetime
     lastEventTime: datetime
     messagesCount: Optional[int] = None
-    status: str
     videoConversation: Optional[VideoConversation] = None
     hasBots: Optional[bool] = None
     restrictions: Optional[int] = None
     prevMessageId: Optional[int] = None
-    cid: Optional[int] = None
+    participantsCount: Optional[int] = None
+    participants: Optional[Dict] = {}
+
+    link: Optional[str] = ''
+    baseIconUrl: Optional[str] = ''
+    baseRawIconUrl: Optional[str] = ''
+    
 
     @field_validator('modified', 'joinTime', 'created', 'lastEventTime', mode='before')
     @classmethod
@@ -75,6 +84,7 @@ class Chat(BaseModel):
         print(f'{"│"*(tab+1)}ID: {self.id}')
         print(f'{"│"*(tab+1)}JoinTime: {self.joinTime}')
         print(f'{"│"*(tab+1)}Created: {self.created}')
-        print(f'{"│"*(tab+1)}lastEventTime: {self.lastEventTime}')
-        print(f'{"│"*(tab+1)}participantsCount: {self.participantsCount}')
+        print(f'{"│"*(tab+1)}LastEventTime: {self.lastEventTime}')
+        print(f'{"│"*(tab+1)}ParticipantsCount: {self.participantsCount}')
+        print(f'{"│"*(tab+1)}Link: {self.link}')
         print(f'{"│"*tab}└{"─"*6}')

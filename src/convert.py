@@ -10,6 +10,7 @@ class PacketCodec:
 
     def __init__(self) -> None:
         self._seq: int = 0
+        self.form_head = struct.Struct(self.HEADER_FORMAT)
 
     @staticmethod
     def _ext_hook(code: int, data: bytes) -> Any:
@@ -25,10 +26,9 @@ class PacketCodec:
         if len(packet) < self.HEADER_SIZE:
             raise ValueError("Packet too short")
 
-        magic, cmd, seq, opcode, compression = struct.unpack(self.HEADER_FORMAT, packet[:7])
+        magic, cmd, seq, opcode, compression = self.form_head.unpack_from(packet[:7])
 
         payload_len = (packet[7] << 16) | (packet[8] << 8) | packet[9]
-
         payload = packet[self.HEADER_SIZE : self.HEADER_SIZE + payload_len]
 
         if compression > 0:
@@ -67,8 +67,8 @@ class PacketCodec:
         cmd = 0
         compression = 0
 
-        header = bytearray(struct.pack(self.HEADER_FORMAT, magic, cmd, self._seq, opcode, compression))
+        header = self.form_head.pack(magic, cmd, self._seq, opcode, compression)
         len_bytes = struct.pack(">I", payload_len)[1:]
         self._seq = (self._seq + 1) & 0xFFFF
 
-        return bytes(header) + len_bytes + payload_bytes
+        return header + len_bytes + payload_bytes
