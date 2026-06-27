@@ -10,6 +10,8 @@ from typing import Any
 from operator import itemgetter
 from collections import defaultdict
 import traceback
+from loguru import logger
+import sys
 
 
 class UniversalEncoder(json.JSONEncoder):
@@ -66,7 +68,7 @@ class Client:
                 if not isinstance(raw, bytes):
                     print("It is not bytes")
                     return
-                print(base64.b64encode(raw))
+                logger.info(base64.b64encode(raw))
                 msg = self.codec.bytes_to_payload(raw)
                 if msg.get("cmd") == 1:
                     opcode = msg.get("opcode")
@@ -133,6 +135,15 @@ class Client:
         # open("src/w2.json", "w").write(json.dumps(await self._recv(), cls=UniversalEncoder, indent=2))
 
 async def main():
+    logger.remove()
+    logger.add(
+        "logs/log_{time:YYYY-MM-DD_HH-mm-ss}.log", 
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}", 
+        level="INFO",
+        encoding="utf-8"
+    )
+    logger.add(sys.stdout, colorize=True, format="<green>{time:HH:mm:ss}</green> | {level} | {message}")
+
     q = Client()
     await q.connect()
     # q.info()
