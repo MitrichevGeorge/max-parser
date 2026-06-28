@@ -1,5 +1,4 @@
 import asyncio
-import json
 from classes import UserProfile, Chat
 import payloads as pl
 import base64
@@ -11,16 +10,6 @@ import sys
 from network import NetworkMixin
 from tools import any_without
 
-
-class UniversalEncoder(json.JSONEncoder):
-    def default(self, o: Any):
-        if isinstance(o, bytes):
-            try:
-                return o.decode('utf-8')
-            except UnicodeDecodeError:
-                return base64.b64encode(o).decode('utf-8')
-        
-        return super().default(o)
 
 class Client(NetworkMixin):
     profile: UserProfile
@@ -65,7 +54,7 @@ class Client(NetworkMixin):
         if not chat.participants:
             raise RuntimeError("No participants")
         # print(chat.participants)
-        return (await self.get_infos([any_without(list(chat.participants.keys()), self.profile.id)]))[0]
+        return (await self.get_infos([any_without(chat.participants.keys(), self.profile.id)]))[0]
 
     # {'magic': 10, 'cmd': 0, 'seq': 26, 'opcode': 32, 'payload': {'contactIds': [146231034]}}
     # {'magic': 10, 'cmd': 1, 'seq': 26, 'opcode': 32, 'payload': {'contacts': [{'id': 146231034, 'updateTime': 1781161654143, 'registrationTime': 1766470709229, 'names': [{'name': 'nekohu', 'firstName': 'nekohu', 'lastName': '', 'type': 'ONEME'}], 'options': ['TT', 'ONEME'], 'accountStatus': 0, 'country': 'RU'}]}}
@@ -87,11 +76,25 @@ class Tuiclient(Client):
         await self.connect()
         self.profile.info()
         print("Chats:")
-        for i in self.chats:
-            if i.type == "DIALOG":
-                print(f'[{i.type}][{i.id}] {(await self.get_chat_part(i)).names[0]} - {i.messagesCount}')
+        user_ids_get = []
+        chat_to_user = {}
+        for chat in self.chats:
+            if chat.type != "DIALOG" or not chat.participants or chat.id == 0:
+                continue
+            user_id = any_without(chat.participants, self.profile.id)
+            user_ids_get.append(user_id)
+            chat_to_user[chat.id] = user_id
+        infos = await self.get_infos(user_ids_get)
+        by_id = {i.id: i for i in infos}
+        for chat in self.chats:
+            if chat.id == 0:
+                name = "Saved messages"
+            elif chat.type == "DIALOG" and chat.id in chat_to_user:
+                info = by_id.get(chat_to_user[chat.id])
+                name = info.names[0] if info else "Unknown"
             else:
-                print(f'[{i.type}][{i.id}] {i.title} - {i.messagesCount}')
+                name = chat.title
+            print(f'[{chat.type}][{chat.id}] {name} - {chat.messagesCount}')
         # for i in await self.search("saved", 2):
         #     Chat(**i).info()
         # print(self.chats[0].participants)
