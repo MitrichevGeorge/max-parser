@@ -93,3 +93,11 @@ class Chat(BaseModel):
         print(f'{"│"*(tab+1)}ParticipantsCount: {self.participantsCount}')
         print(f'{"│"*(tab+1)}Link: {self.link}')
         print(f'{"│"*tab}└{"─"*6}')
+
+class ProfileContainer(BaseModel):
+    contact: UserProfile
+
+class ServerData(BaseModel):
+    profile: ProfileContainer
+    contacts: List[UserProfile]
+    chats: List[Chat]

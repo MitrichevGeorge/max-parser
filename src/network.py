@@ -8,6 +8,9 @@ from loguru import logger
 import payloads as pl
 from settings import stg
 
+import json
+from tools import UniversalEncoder
+
 
 class NetworkMixin:
     def _netw_init(self):
@@ -38,6 +41,7 @@ class NetworkMixin:
         await self._send(19, pl.get_auth_payload(stg.ONEME_AUTH["token"]))
         await self.connection.recv()
         data = (await self._recv())['payload']
+        # open("src/w.json", "w").write(json.dumps(await self._recv(), cls=UniversalEncoder, indent=2))
         self._reader_task = asyncio.create_task(self._reader_loop())
         return data
 

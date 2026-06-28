@@ -1,5 +1,6 @@
 from typing import Iterable, Any
 import json
+import base64
 
 def any_without(lst: Iterable, val: Any) -> Any:
     return next(iter(set(lst) - {val}), val)

@@ -1,7 +1,6 @@
 import asyncio
-from classes import UserProfile, Chat
+from classes import UserProfile, Chat, ServerData
 import payloads as pl
-import base64
 from typing import Any, List
 from operator import itemgetter
 from pydantic import TypeAdapter
@@ -20,10 +19,10 @@ class Client(NetworkMixin):
         self._netw_init()
 
     async def connect(self):
-        data = await self._netw_connect()
-        self.profile = UserProfile(**data['profile']['contact'])
-        self.contacts = [UserProfile(**i) for i in data['contacts']]
-        self.chats = [Chat(**i) for i in data['chats']]
+        data = ServerData.model_validate(await self._netw_connect())
+        self.profile = data.profile.contact
+        self.contacts = data.contacts
+        self.chats = data.chats
 
     async def disconnect(self):
         if self.connection:
@@ -48,34 +47,11 @@ class Client(NetworkMixin):
     async def get_infos(self, contactIds: List[int]) -> List[UserProfile]:
         await self._send(32, {'contactIds': contactIds})
         response = await self.wait_for_opcode(32)
-        return [UserProfile(**i ) for i in response["payload"]["contacts"]]
+        adapter = TypeAdapter(List[UserProfile])
+        return adapter.validate_python(response["payload"]["contacts"])
 
-    async def get_chat_part(self, chat: Chat) -> UserProfile:
-        if not chat.participants:
-            raise RuntimeError("No participants")
-        # print(chat.participants)
-        return (await self.get_infos([any_without(chat.participants.keys(), self.profile.id)]))[0]
-
-    # {'magic': 10, 'cmd': 0, 'seq': 26, 'opcode': 32, 'payload': {'contactIds': [146231034]}}
-    # {'magic': 10, 'cmd': 1, 'seq': 26, 'opcode': 32, 'payload': {'contacts': [{'id': 146231034, 'updateTime': 1781161654143, 'registrationTime': 1766470709229, 'names': [{'name': 'nekohu', 'firstName': 'nekohu', 'lastName': '', 'type': 'ONEME'}], 'options': ['TT', 'ONEME'], 'accountStatus': 0, 'country': 'RU'}]}}
-
-
-class Tuiclient(Client):
-    async def _init_log(self):
-        logger.remove()
-        logger.add(
-            "logs/log_{time:YYYY-MM-DD_HH-mm-ss}.log", 
-            format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}", 
-            level="INFO",
-            encoding="utf-8"
-        )
-        logger.add(sys.stdout, colorize=True, format="<green>{time:HH:mm:ss}</green> | {level} | {message}")
-
-    async def begin(self):
-        await self._init_log()
-        await self.connect()
-        self.profile.info()
-        print("Chats:")
+    async def norm_chatlist(self) -> List[str]:
+        result = []
         user_ids_get = []
         chat_to_user = {}
         for chat in self.chats:
@@ -94,7 +70,28 @@ class Tuiclient(Client):
                 name = info.names[0] if info else "Unknown"
             else:
                 name = chat.title
-            print(f'[{chat.type}][{chat.id}] {name} - {chat.messagesCount}')
+            result.append(f'[{chat.type}][{chat.id}] {name} - {chat.messagesCount}')
+        return result
+
+
+class Tuiclient(Client):
+    async def _init_log(self):
+        logger.remove()
+        logger.add(
+            "logs/log_{time:YYYY-MM-DD_HH-mm-ss}.log", 
+            format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}", 
+            level="INFO",
+            encoding="utf-8"
+        )
+        logger.add(sys.stdout, colorize=True, format="<green>{time:HH:mm:ss}</green> | {level} | {message}")
+
+    async def begin(self):
+        await self._init_log()
+        await self.connect()
+        self.profile.info()
+        print("Chats:")
+        for i in enumerate(await self.norm_chatlist()):
+            print(f'{i[0]}) {i[1]}')
         # for i in await self.search("saved", 2):
         #     Chat(**i).info()
         # print(self.chats[0].participants)
