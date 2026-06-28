@@ -1,18 +1,15 @@
 import asyncio
 import json
-import websockets
 from classes import UserProfile, Chat
-from settings import stg
 import payloads as pl
-from convert import PacketCodec
 import base64
-from typing import Any
+from typing import Any, List
 from operator import itemgetter
-from collections import defaultdict
-import traceback
+from pydantic import TypeAdapter
 from loguru import logger
 import sys
 from network import NetworkMixin
+from tools import any_without
 
 
 class UniversalEncoder(json.JSONEncoder):
@@ -59,6 +56,21 @@ class Client(NetworkMixin):
         return list(map(get_chats, response["payload"]["result"]))
         # open("src/w2.json", "w").write(json.dumps(await self._recv(), cls=UniversalEncoder, indent=2))
 
+    async def get_infos(self, contactIds: List[int]) -> List[UserProfile]:
+        await self._send(32, {'contactIds': contactIds})
+        response = await self.wait_for_opcode(32)
+        return [UserProfile(**i ) for i in response["payload"]["contacts"]]
+
+    async def get_chat_part(self, chat: Chat) -> UserProfile:
+        if not chat.participants:
+            raise RuntimeError("No participants")
+        # print(chat.participants)
+        return (await self.get_infos([any_without(list(chat.participants.keys()), self.profile.id)]))[0]
+
+    # {'magic': 10, 'cmd': 0, 'seq': 26, 'opcode': 32, 'payload': {'contactIds': [146231034]}}
+    # {'magic': 10, 'cmd': 1, 'seq': 26, 'opcode': 32, 'payload': {'contacts': [{'id': 146231034, 'updateTime': 1781161654143, 'registrationTime': 1766470709229, 'names': [{'name': 'nekohu', 'firstName': 'nekohu', 'lastName': '', 'type': 'ONEME'}], 'options': ['TT', 'ONEME'], 'accountStatus': 0, 'country': 'RU'}]}}
+
+
 class Tuiclient(Client):
     async def _init_log(self):
         logger.remove()
@@ -76,7 +88,15 @@ class Tuiclient(Client):
         self.profile.info()
         print("Chats:")
         for i in self.chats:
-            print(f'[{i.type}][{i.id}] {i.title} - {i.messagesCount}')
+            if i.type == "DIALOG":
+                print(f'[{i.type}][{i.id}] {(await self.get_chat_part(i)).names[0]} - {i.messagesCount}')
+            else:
+                print(f'[{i.type}][{i.id}] {i.title} - {i.messagesCount}')
+        # for i in await self.search("saved", 2):
+        #     Chat(**i).info()
+        # print(self.chats[0].participants)
+        # if self.chats[0].participants:
+        #     (await self.get_infos([next(iter(self.chats[0].participants.keys()))]))[0].info()
 
 
 async def main():

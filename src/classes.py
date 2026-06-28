@@ -8,12 +8,17 @@ class NameInfo(BaseModel):
     lastName: Optional[str] = None
     type: str
 
+    def __str__(self) -> str:
+        if self.lastName:
+            return f'{self.firstName} {self.lastName}'
+        return self.firstName
+
 class UserProfile(BaseModel):
     id: int
     registrationTime: datetime
     updateTime: datetime
     accountStatus: int
-    country: str
+    country: Optional[str] = ''
     names: List[NameInfo]
     options: List[str]
     phone: Optional[int] = None
@@ -31,7 +36,7 @@ class UserProfile(BaseModel):
         print(f'{"│"*tab}┌{"─"*4} [{self.country}] {self.names[0].name}')
         print(f'{"│"*(tab+1)}Phone: +{self.phone}')
         print(f'{"│"*(tab+1)}ID: {self.id}')
-        print(f'{"│"*(tab+1)}ReGistration: {self.registrationTime}')
+        print(f'{"│"*(tab+1)}Registration: {self.registrationTime}')
         print(f'{"│"*(tab+1)}Update: {self.updateTime}')
         print(f'{"│"*tab}└{"─"*6}')
 
