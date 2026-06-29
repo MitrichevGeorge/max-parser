@@ -12,6 +12,10 @@ import json
 from tools import UniversalEncoder
 
 
+def _save_json(file: str, data) -> None:
+    with open(file, "w", encoding="utf-8") as f:
+        json.dump(data, f, cls=UniversalEncoder, indent=2, ensure_ascii=False)
+
 class NetworkMixin:
     def _netw_init(self):
         self.connection = None
@@ -41,7 +45,7 @@ class NetworkMixin:
         await self._send(19, pl.get_auth_payload(stg.ONEME_AUTH["token"]))
         await self.connection.recv()
         data = (await self._recv())['payload']
-        # open("src/w.json", "w").write(json.dumps(await self._recv(), cls=UniversalEncoder, indent=2))
+        # _save_json("src/w.json", data)
         self._reader_task = asyncio.create_task(self._reader_loop())
         return data
 
