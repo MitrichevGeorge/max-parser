@@ -14,3 +14,26 @@ class UniversalEncoder(json.JSONEncoder):
                 return base64.b64encode(o).decode('utf-8')
         
         return super().default(o)
+
+from typing import Annotated
+from pydantic import BeforeValidator, PlainSerializer
+
+def parse_on_off(value: Any) -> bool:
+    if isinstance(value, str):
+        val_upper = value.upper().strip()
+        if val_upper == "ON":
+            return True
+        if val_upper == "OFF":
+            return False
+    if isinstance(value, bool):
+        return value
+    raise ValueError(f"Невозможно привести {value} к bool")
+
+def serialize_on_off(value: bool) -> str:
+    return "ON" if value else "OFF"
+
+OnOffBool = Annotated[
+    bool, 
+    BeforeValidator(parse_on_off),
+    PlainSerializer(serialize_on_off, return_type=str)
+]

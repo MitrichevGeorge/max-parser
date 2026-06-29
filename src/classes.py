@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
+from enum import StrEnum, auto
 from pydantic import BaseModel, Field, field_validator
+from tools import OnOffBool
 
 class NameInfo(BaseModel):
     name: str
@@ -94,10 +96,55 @@ class Chat(BaseModel):
         print(f'{"│"*(tab+1)}Link: {self.link}')
         print(f'{"│"*tab}└{"─"*6}')
 
+
 class ProfileContainer(BaseModel):
     contact: UserProfile
+
+class ChatConfig(BaseModel):
+    dontDisturbUntil: int
+    vibr: bool
+    sound: bool
+    led: bool
+    favIndex: int
+
+class TypeGroup(StrEnum):
+    CONTACTS = "CONTACTS"
+    ALL = "ALL"
+    NOBODY = "NOBODY"
+
+class UserAccountConfig(BaseModel):
+    PHONE_NUMBER_PRIVACY: TypeGroup
+    SEARCH_BY_PHONE: TypeGroup
+    INCOMING_CALL: TypeGroup
+    CHATS_INVITE: TypeGroup
+    HIDDEN: bool
+    FAMILY_PROTECTION: OnOffBool
+    DOUBLE_TAP_REACTION_DISABLED: bool
+    DOUBLE_TAP_REACTION_VALUE: Any
+    SAFE_MODE_NO_PIN: bool
+
+    CHATS_PUSH_NOTIFICATION: OnOffBool
+    M_CALL_PUSH_NOTIFICATION: OnOffBool
+    PUSH_NEW_CONTACTS: bool
+    PUSH_DETAILS: bool
+    CHATS_PUSH_SOUND: str
+    PUSH_SOUND: str
+    UNSAFE_FILES: bool
+    DONT_DISTURB_UNTIL: int
+    INACTIVE_TTL: str
+    SHOW_READ_MARK: bool
+    ALT_KEYBOARD: bool
+    CONTENT_LEVEL_ACCESS: bool
+    STICKERS_SUGGEST: OnOffBool
+    SAFE_MODE: bool
+    AUDIO_TRANSCRIPTION_ENABLED: bool
+
+class ConfigContainer(BaseModel):
+    chats: Dict[int, ChatConfig]
+    user: UserAccountConfig
 
 class ServerData(BaseModel):
     profile: ProfileContainer
     contacts: List[UserProfile]
     chats: List[Chat]
+    config: ConfigContainer
