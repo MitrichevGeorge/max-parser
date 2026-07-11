@@ -1,14 +1,18 @@
+# Стандартные библиотеки
 import asyncio
-import websockets
-from convert import PacketCodec
 import base64
-from collections import defaultdict
+import json
 import traceback
+from collections import defaultdict
+from typing import List
 from loguru import logger
+from pydantic import TypeAdapter
+import websockets
+
+from classes import Chat, ConfigContainer, ServerData, UserProfile
+from convert import PacketCodec
 import payloads as pl
 from settings import stg
-
-import json
 from tools import UniversalEncoder
 
 
@@ -105,3 +109,9 @@ class NetworkMixin:
         if self.connection:
             await self.connection.close()
             print(f"Connection to {pl.URL} closed")
+
+    async def get_infos(self, contactIds: List[int]) -> List[UserProfile]:
+        await self._send(32, {'contactIds': contactIds})
+        response = await self.wait_for_opcode(32)
+        adapter = TypeAdapter(List[UserProfile])
+        return adapter.validate_python(response["payload"]["contacts"])

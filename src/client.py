@@ -1,9 +1,8 @@
 import asyncio
-from classes import UserProfile, Chat, ServerData
+from classes import ConfigContainer, UserProfile, Chat, ServerData
 import payloads as pl
 from typing import Any, List
 from operator import itemgetter
-from pydantic import TypeAdapter
 from loguru import logger
 import sys
 from network import NetworkMixin
@@ -14,6 +13,7 @@ class Client(NetworkMixin):
     profile: UserProfile
     contacts: list[UserProfile]
     chats: list[Chat]
+    config: ConfigContainer
 
     def __init__(self) -> None:
         self._netw_init()
@@ -23,6 +23,7 @@ class Client(NetworkMixin):
         self.profile = data.profile.contact
         self.contacts = data.contacts
         self.chats = data.chats
+        self.config = data.config
 
     async def disconnect(self):
         if self.connection:
@@ -44,12 +45,6 @@ class Client(NetworkMixin):
         return list(map(get_chats, response["payload"]["result"]))
         # open("src/w2.json", "w").write(json.dumps(await self._recv(), cls=UniversalEncoder, indent=2))
 
-    async def get_infos(self, contactIds: List[int]) -> List[UserProfile]:
-        await self._send(32, {'contactIds': contactIds})
-        response = await self.wait_for_opcode(32)
-        adapter = TypeAdapter(List[UserProfile])
-        return adapter.validate_python(response["payload"]["contacts"])
-
     async def norm_chatlist(self) -> List[str]:
         result = []
         user_ids_get = []
@@ -70,7 +65,11 @@ class Client(NetworkMixin):
                 name = info.names[0] if info else "Unknown"
             else:
                 name = chat.title
-            result.append(f'[{chat.type}][{chat.id}] {name} - {chat.messagesCount}')
+            sound = ""
+            if chat.id in self.config.chats:
+                if self.config.chats[chat.id].dontDisturbUntil == -1:
+                    sound = " muted"
+            result.append(f'[{chat.type}][{chat.id}] {name} - {chat.messagesCount}{sound}')
         return result
 
 
