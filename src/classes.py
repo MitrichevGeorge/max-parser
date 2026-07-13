@@ -35,12 +35,14 @@ class UserProfile(BaseModel):
         return value
 
     def info(self, tab = 0):
-        print(f'{"│"*tab}┌{"─"*4} [{self.country}] {self.names[0].name}')
-        print(f'{"│"*(tab+1)}Phone: +{self.phone}')
-        print(f'{"│"*(tab+1)}ID: {self.id}')
-        print(f'{"│"*(tab+1)}Registration: {self.registrationTime}')
-        print(f'{"│"*(tab+1)}Update: {self.updateTime}')
-        print(f'{"│"*tab}└{"─"*6}')
+        indent = "│" * tab
+        child_indent = "│" * (tab + 1)
+        print(f'{indent}┌{"─"*4} [{self.country}] {self.names[0].name}')
+        print(f'{child_indent}Phone: +{self.phone}')
+        print(f'{child_indent}ID: {self.id}')
+        print(f'{child_indent}Registration: {self.registrationTime}')
+        print(f'{child_indent}Update: {self.updateTime}')
+        print(f'{indent}└{"─"*6}')
 
     def get_name(self) -> str:
         if len(self.names) == 0:
@@ -96,14 +98,16 @@ class Chat(BaseModel):
         return value
 
     def info(self, tab = 0):
-        print(f'{"│"*tab}┌{"─"*4} [{self.type}] {self.title}')
-        print(f'{"│"*(tab+1)}ID: {self.id}')
-        print(f'{"│"*(tab+1)}JoinTime: {self.joinTime}')
-        print(f'{"│"*(tab+1)}Created: {self.created}')
-        print(f'{"│"*(tab+1)}LastEventTime: {self.lastEventTime}')
-        print(f'{"│"*(tab+1)}ParticipantsCount: {self.participantsCount}')
-        print(f'{"│"*(tab+1)}Link: {self.link}')
-        print(f'{"│"*tab}└{"─"*6}')
+        indent = "│" * tab
+        child_indent = "│" * (tab + 1)
+        print(f'{indent}┌{"─"*4} [{self.type}] {self.title}')
+        print(f'{child_indent}ID: {self.id}')
+        print(f'{child_indent}JoinTime: {self.joinTime}')
+        print(f'{child_indent}Created: {self.created}')
+        print(f'{child_indent}LastEventTime: {self.lastEventTime}')
+        print(f'{child_indent}ParticipantsCount: {self.participantsCount}')
+        print(f'{child_indent}Link: {self.link}')
+        print(f'{indent}└{"─"*6}')
 
     messages: Optional[List[Message]] = []
     messages_by_id: Optional[Dict[int,Message]] = {}

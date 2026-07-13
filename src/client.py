@@ -81,14 +81,16 @@ class Client(NetworkMixin):
 
     async def get_message_info(self, message: Message, tab: int = 0):
         await self.update_missing_users([message.sender])
-        print(f'{"│"*tab}┌{"─"*4} {message.time.strftime("%d.%m.%Y %H:%M:%S")}')
-        print(f'{"│"*(tab+1)}ID: {message.id}')
-        print(f'{"│"*(tab+1)}Type: {message.type}')
-        print(f'{"│"*(tab+1)}Sender: [{message.sender}] {self.users_by_id[message.sender].get_name()}')
-        print(f'{"│"*(tab+1)}Text: {message.text.replace("\n", "\n"+"│"*(tab+2))}')
-        print(f'{"│"*(tab+1)}Attaches: { [i["baseUrl"] for i in message.attaches] }')
-        print(f'{"│"*(tab+1)}ReactionInfo: {message.reactionInfo}')
-        print(f'{"│"*tab}└{"─"*6}')
+        indent = "│" * tab
+        child_indent = "│" * (tab + 1)
+        print(f'{indent}┌{"─"*4} {message.time.strftime("%d.%m.%Y %H:%M:%S")}')
+        print(f'{child_indent}ID: {message.id}')
+        print(f'{child_indent}Type: {message.type}')
+        print(f'{child_indent}Sender: [{message.sender}] {self.users_by_id[message.sender].get_name()}')
+        print(f'{child_indent}Text: {message.text.replace("\n", "\n"+"│"*(tab+2))}')
+        print(f'{child_indent}Attaches: { [i["baseUrl"] for i in message.attaches] }')
+        print(f'{child_indent}ReactionInfo: {message.reactionInfo}')
+        print(f'{indent}└{"─"*6}')
 
     async def norm_chat(self, chat_id: int) -> list[tuple[int, str, int]]:
         result: list[tuple[int, str, int]] = []
