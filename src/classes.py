@@ -43,7 +43,13 @@ class UserProfile(BaseModel):
         print(f'{"│"*tab}└{"─"*6}')
 
     def get_name(self) -> str:
-        return self.names[0].name
+        if len(self.names) == 0:
+            return ""
+        name_info = self.names[0]
+        first = (name_info.firstName or "").strip()
+        last = (name_info.lastName or "").strip()
+        
+        return " ".join(part for part in (first, last) if part)
 
 class VideoConversation(BaseModel):
     joinLink: str
