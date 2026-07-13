@@ -8,8 +8,10 @@ from typing import List
 from loguru import logger
 from pydantic import TypeAdapter
 import websockets
+from operator import itemgetter
+from datetime import datetime
 
-from classes import Chat, ConfigContainer, ServerData, UserProfile
+from classes import Chat, ConfigContainer, ServerData, UserProfile, Message
 from convert import PacketCodec
 import payloads as pl
 from settings import stg
@@ -110,8 +112,23 @@ class NetworkMixin:
             await self.connection.close()
             print(f"Connection to {pl.URL} closed")
 
+    async def search(self, query: str, count: int = 40):
+        await self._send(68, {'query': query, 'count': count })
+        response = await self.wait_for_opcode(68)
+        get_chats = itemgetter("chat")
+        return list(map(get_chats, response["payload"]["result"]))
+
     async def get_infos(self, contactIds: List[int]) -> List[UserProfile]:
         await self._send(32, {'contactIds': contactIds})
         response = await self.wait_for_opcode(32)
         adapter = TypeAdapter(List[UserProfile])
         return adapter.validate_python(response["payload"]["contacts"])
+
+    async def get_messages(self, chatID: int, d_from: datetime = datetime.now(), backward: int = 60) -> List[Message]:
+        await self._send(49, {'chatId': chatID, 'from': int(d_from.timestamp() * 1000), 'forward': 0, 'backward': backward, 'getMessages': True})
+        response = await self.wait_for_opcode(49)
+        adapter = TypeAdapter(List[Message])
+        return adapter.validate_python(response["payload"]["messages"])
+        # open("src/w2.json", "w").write(json.dumps(response, cls=UniversalEncoder, indent=2))
+
+

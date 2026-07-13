@@ -42,6 +42,9 @@ class UserProfile(BaseModel):
         print(f'{"│"*(tab+1)}Update: {self.updateTime}')
         print(f'{"│"*tab}└{"─"*6}')
 
+    def get_name(self) -> str:
+        return self.names[0].name
+
 class VideoConversation(BaseModel):
     joinLink: str
     type: int
@@ -148,3 +151,15 @@ class ServerData(BaseModel):
     contacts: List[UserProfile]
     chats: List[Chat]
     config: ConfigContainer
+
+class TypeMessage(StrEnum):
+    USER = "USER"
+
+class Message(BaseModel):
+    id: int
+    time: datetime
+    type: TypeMessage
+    sender: int
+    text: str
+    attaches: List
+    reactionInfo: Dict

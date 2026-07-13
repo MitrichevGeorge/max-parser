@@ -37,3 +37,22 @@ OnOffBool = Annotated[
     BeforeValidator(parse_on_off),
     PlainSerializer(serialize_on_off, return_type=str)
 ]
+
+def read_number(read: str = "", max_n: int | None = None, min_n: int | None = None) -> int:
+    while True:
+        try:
+            s = input(f"{read} -> ")
+            if s.strip() == "":
+                print("Can not be blank")
+            n = int(s)
+            if max_n:
+                if n > max_n:
+                    print(f"Must be smaller {max_n}")
+                    continue
+            if min_n:
+                if n < min_n:
+                    print(f"Must be bigger {max_n}")
+                    continue
+            return n
+        except ValueError:
+            print("Must be number")
