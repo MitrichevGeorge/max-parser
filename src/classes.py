@@ -99,6 +99,13 @@ class Chat(BaseModel):
         print(f'{"│"*(tab+1)}Link: {self.link}')
         print(f'{"│"*tab}└{"─"*6}')
 
+    messages: Optional[List[Message]] = []
+    messages_by_id: Optional[Dict[int,Message]] = {}
+
+    def update_messages(self):
+        if self.messages:
+            self.messages_by_id = {i.id: i for i in self.messages}
+
 
 class ProfileContainer(BaseModel):
     contact: UserProfile
@@ -161,5 +168,5 @@ class Message(BaseModel):
     type: TypeMessage
     sender: int
     text: str
-    attaches: List
+    attaches: List[Dict]
     reactionInfo: Dict

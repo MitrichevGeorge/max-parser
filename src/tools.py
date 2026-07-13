@@ -19,15 +19,15 @@ from typing import Annotated
 from pydantic import BeforeValidator, PlainSerializer
 
 def parse_on_off(value: Any) -> bool:
-    if isinstance(value, str):
-        val_upper = value.upper().strip()
-        if val_upper == "ON":
+    match value:
+        case bool():
+            return value
+        case str() if value.strip().upper() == "ON":
             return True
-        if val_upper == "OFF":
+        case str() if value.strip().upper() == "OFF":
             return False
-    if isinstance(value, bool):
-        return value
-    raise ValueError(f"Невозможно привести {value} к bool")
+        case _:
+            raise ValueError(f"Unsupported value: {repr(value)} (type: {type(value).__name__})")
 
 def serialize_on_off(value: bool) -> str:
     return "ON" if value else "OFF"
@@ -38,21 +38,23 @@ OnOffBool = Annotated[
     PlainSerializer(serialize_on_off, return_type=str)
 ]
 
-def read_number(read: str = "", max_n: int | None = None, min_n: int | None = None) -> int:
+def read_number(prompt: str = "", min_n: int | None = None, max_n: int | None = None) -> int:
     while True:
+        if not (user_input := input(f"{prompt} -> ").strip()):
+            print("Input cannot be blank.")
+            continue
+
         try:
-            s = input(f"{read} -> ")
-            if s.strip() == "":
-                print("Can not be blank")
-            n = int(s)
-            if max_n:
-                if n > max_n:
-                    print(f"Must be smaller {max_n}")
-                    continue
-            if min_n:
-                if n < min_n:
-                    print(f"Must be bigger {max_n}")
-                    continue
-            return n
+            number = int(user_input)
         except ValueError:
-            print("Must be number")
+            print("Input must be a valid integer.")
+            continue
+
+        if min_n is not None and number < min_n:
+            print(f"Number must be greater than or equal to {min_n}.")
+            continue
+        if max_n is not None and number > max_n:
+            print(f"Number must be less than or equal to {max_n}.")
+            continue
+
+        return number

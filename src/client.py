@@ -1,5 +1,5 @@
 import asyncio
-from classes import ConfigContainer, UserProfile, Chat, ServerData
+from classes import ConfigContainer, Message, UserProfile, Chat, ServerData
 import payloads as pl
 from typing import Any, Dict, List
 from operator import itemgetter
@@ -71,20 +71,33 @@ class Client(NetworkMixin):
 
         return [format_chat(chat, idx) for idx, chat in enumerate(self.chats)]
 
-    async def norm_chat(self, chat_id: int):
-        result = []
+    def get_message_info(self, message: Message, tab: int = 0):
+        print(f'{"│"*tab}┌{"─"*4} {message.time.strftime("%d.%m.%Y %H:%M:%S")}')
+        print(f'{"│"*(tab+1)}ID: {message.id}')
+        print(f'{"│"*(tab+1)}Type: {message.type}')
+        print(f'{"│"*(tab+1)}Sender: {message.sender}')
+        print(f'{"│"*(tab+1)}Text: {message.text}')
+        print(f'{"│"*(tab+1)}Attaches: { [i["baseUrl"] for i in message.attaches] }')
+        print(f'{"│"*(tab+1)}ReactionInfo: {message.reactionInfo}')
+        print(f'{"│"*tab}└{"─"*6}')
+
+    async def norm_chat(self, chat_id: int) -> list[tuple[int, str, int]]:
+        result: list[tuple[int, str, int]] = []
         chat = self.chats_by_id[chat_id]
         if not chat.participants:
             raise RuntimeError
         user_ids_get = list(chat.participants)
         infos = await self.get_infos(user_ids_get)
         by_id = {i.id: i for i in infos}
-        messages = (await self.get_messages(chat_id))
-        for i in messages:
+        chat.messages = (await self.get_messages(chat_id))
+        chat.update_messages()
+        q = 0
+        for i in chat.messages:
             sender_name = by_id[i.sender].get_name()
             date_str = i.time.strftime("%d.%m.%Y %H:%M:%S")
             attach_str = f" [{len(i.attaches)} attaches]" if i.attaches else ""
-            result.append(f'[{date_str}] {sender_name}: {i.text}{attach_str}')
+            result.append((q, f'[{date_str}] {sender_name}: {i.text}{attach_str}', i.id))
+            q += 1
         return result
 
 class Tuiclient(Client):
@@ -110,9 +123,14 @@ class Tuiclient(Client):
         chat_id = norm_chatlist[read_number(min_n=0, max_n=(len(norm_chatlist) - 1))][2]
         if not isinstance(chat_id, int):
             raise ValueError
-        print(chat_id)
-        for i in await self.norm_chat(chat_id):
-            print(i)
+        self.chats_by_id[chat_id].info()
+        norm_chat = await self.norm_chat(chat_id)
+        for i in norm_chat:
+            print(f'{i[0]}) {i[1]}')
+        msg_id = norm_chat[read_number(min_n=0, max_n=(len(norm_chat) - 1))][2]
+        msg_by_id = self.chats_by_id[chat_id].messages_by_id
+        if msg_by_id:
+            self.get_message_info(msg_by_id[msg_id])
         # if isinstance(chat_id, int):
         #     for i in :
         #         print()
