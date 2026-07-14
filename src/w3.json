@@ -1,0 +1,140 @@
+{
+  "magic": 10,
+  "cmd": 1,
+  "seq": 3,
+  "opcode": 49,
+  "compression": 2,
+  "payload": {
+    "messages": [
+      {
+        "id": 115768348260180724,
+        "time": 1766484806216,
+        "type": "USER",
+        "sender": 48305790,
+        "text": "\u0414\u043e\u0431\u0440\u044b\u0439 \u0434\u0435\u043d\u044c! \u041f\u0435\u0440\u0435\u0438\u043c\u0435\u043d\u0443\u0439 \u0430\u043a\u043a\u0430\u0443\u043d\u0442 \u043e\u0444\u0438\u0446\u0438\u0430\u043b\u044c\u043d\u044b\u043c\u0438 \u0434\u0430\u043d\u043d\u044b\u043c\u0438",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 115773999455227062,
+        "time": 1766571036609,
+        "type": "USER",
+        "sender": 137594677,
+        "cid": 1448859956332681,
+        "text": "",
+        "attaches": [
+          {
+            "previewData": "UklGRuIAAABXRUJQVlA4INYAAAAwBwCdASopADIAP3G0zGG0rigmJXgKapAuCWkABwOiV8u7zFPXqfkwnVr4YOkvCB5FBdLsMnfSyfWoWePkpm4FVwAA/ppFv+FU5WOmeDebidevA7yzMBtLNkKAI4C++QHsmUL0MFMredfkhW7CNGIhNEJZ0oinab+MY0YD+7b1bmdT8PW5KNe4qdzdLLrFoAc7AGXGOhJ4BKx8oD6Uy06vYb4p3+jfjtCLzQIiNAEHYpHkS90mT+YFbo7bqk5+jKfc6rb8NaxSiU8uXBoe6CnfrVFDIAAA",
+            "baseUrl": "https://i.oneme.ru/i?r=BTE2sh_eZW7g8kugOdIm2Notjq0klm_uTF_HabvStyFf9m6Sn253oldRwxOboMF83zo",
+            "photoToken": "XVShTQkMdTioyga+42TwnCDGMaa3Z1lJ8JEMcJO7fuSqvP7PcB8YKAAV/m8c6j7yapMSp/Wjv/1kaTcG9IctGKtZpKz7BxkaCQcJoawiip4=",
+            "_type": "PHOTO",
+            "width": 910,
+            "photoId": 1623272757,
+            "height": 1118
+          }
+        ],
+        "reactionInfo": {}
+      },
+      {
+        "id": 115774001109221549,
+        "time": 1766571061847,
+        "type": "USER",
+        "sender": 137594677,
+        "cid": -1448885533591310,
+        "text": "",
+        "attaches": [
+          {
+            "previewData": "UklGRvAAAABXRUJQVlA4IOQAAAAQCACdASooADIAP12UwFiyqiclMrtuYlAriWcADCGzNAOx8TpA6Xja4iT8SbY4VwXti8ZkFZzYdGZIAGelSvd6vtk4wnPa9GDAAP7TlcuLKpsj1HDLbxkoZLP2++z9th7Rg8ZCon99JcJ0gGjWCOE9LYW0uctjzI1u0HBjH0U78TWBGb0w16QOkGzj9QkPUCqrs310Arzm1GmjR/yRoJc/MT6JCbR8htQvFkAJHQBwMosX/3VrQKPL0er6OAD5IraNmgq8cKF7zvlRBHVdrHrJQdJxErOiue6uyo3mZnG2AjgAAAA=",
+            "baseUrl": "https://i.oneme.ru/i?r=BTE2sh_eZW7g8kugOdIm2Notqv6j5olV329DOJXLJWpz8m6Sn253oldRwxOboMF83zo",
+            "photoToken": "iXmdwi8qsJqXkC6aQNX1qU/ukQPJsevAr+SqucLTjd60IWGnaokgPAuGhy3tBi5mki2Y/IHVli6cevemhj1HLjmec7paop0VOD2goyYkfZJsSgimmtuJKhBXEn6Q270E",
+            "_type": "PHOTO",
+            "width": 886,
+            "photoId": 1623296053,
+            "height": 1116
+          }
+        ],
+        "reactionInfo": {}
+      },
+      {
+        "id": 115774090750546382,
+        "time": 1766572429665,
+        "type": "USER",
+        "sender": 137594677,
+        "cid": -1450252159733466,
+        "text": "",
+        "attaches": [
+          {
+            "previewData": "UklGRqQAAABXRUJQVlA4IJgAAAAwBQCdASomADIAP2WmxVizLrmjrVme2zAsiWdsGV8U+gAjANA/EM7QxMMVkw0vzQF2AAD+30Y/zM61CkzJs9NZbDZRuheS5XDpIikLLysb2ox7XGr4fDFQB08o2h8yAphd2LtaE2tTLx8kncTSjhIzJEAknO+txW/0/GUUjHOAx2ecgoNwLSxF7uUfTEXoIGctvjSN3HAAAA==",
+            "baseUrl": "https://i.oneme.ru/i?r=BTE2sh_eZW7g8kugOdIm2NotubbIdgyyU3JTXQX9-Xw8MW6Sn253oldRwxOboMF83zo",
+            "photoToken": "r6IkndZPpRm9BL12MTmtewXCOmtrFyzW6SCgMij+mDGFjcBY0gCO1kbg5hUbA5y7HQr8aSzUBj+twp4Cwuj5AhtAsUP1frOU",
+            "_type": "PHOTO",
+            "width": 750,
+            "photoId": 1624797493,
+            "height": 982
+          }
+        ],
+        "reactionInfo": {}
+      },
+      {
+        "id": 115774105113025580,
+        "time": 1766572648819,
+        "type": "USER",
+        "sender": 137594677,
+        "cid": 1450472889867853,
+        "text": "",
+        "attaches": [
+          {
+            "previewData": "UklGRr4AAABXRUJQVlA4ILIAAAAwBwCdASoiADIAP3Gsyl00rSgkqrgLApAuCWkABwMqA9R9vywj7UDnkMwYbRJnZNhIX7PbcdOjL/nrCb9izJeynkAA/t7sJ/35/byiZ5gZb04s3C0Y0DLKN3bYcvyqX1ZKCAqA5+R2nLL+MR2WnLVKPIdeWQa7H+WCZFgG8peQkpSOHQhzU6RDhyBZ7FwiDMZ0NrN0orDI7RmRdiaI1mkMshc9PYWnHNZrSx5BO1miEAAA",
+            "baseUrl": "https://i.oneme.ru/i?r=BTE2sh_eZW7g8kugOdIm2NotfejryCIF01TkgvFCUBZtJ26Sn253oldRwxOboMF83zo",
+            "photoToken": "C8D5q75AOejsZ/K1HPfW1xDrlBbox2k3+d4oAPgDdH0idk/sV6kXojxrLv9GmERMYItmgTqhtKOcNY9U3peBrtxd9v4jI4kMenqifmVE2og=",
+            "_type": "PHOTO",
+            "width": 750,
+            "photoId": 1625018165,
+            "height": 1092
+          }
+        ],
+        "reactionInfo": {}
+      },
+      {
+        "id": 115774106328571586,
+        "time": 1766572667367,
+        "type": "USER",
+        "sender": 137594677,
+        "cid": 1450490186196639,
+        "text": "",
+        "attaches": [
+          {
+            "previewData": "UklGRs4AAABXRUJQVlA4IMIAAADQBgCdASooADIAP3GWwVi0qaajsrbeYpAuCWlnewMtcWlW+z59VGFzvrKuPKWBZvDvtEBdo14RQGYpqO+WigAA/sppw6rrDY9sKl/n05jsnZvP1sAl9na68UfRLalsRpfoodwvbGsif0UMppJunu24PTuS0A+1vxaunIdDQm4LLJWlKezMYd6YLhKnW7AbHnTeJb4GOGOhXKvlNJjR1PRa1RemZkdFIHpVzSoO2xVPwhgoCwmOzJjh8KiQFXdFTroAAA==",
+            "baseUrl": "https://i.oneme.ru/i?r=BTE2sh_eZW7g8kugOdIm2Nothq3SiE44iawI2_ZzbH_VBm6Sn253oldRwxOboMF83zo",
+            "photoToken": "ATkWQTObsp4dvmW8xk51eZ9bymunhv4BU83m9lCRnoBMgYcmC1en3srbnaOMEQhC6O7lXUszifiJZR6qtwr3gKkmooyRNp6P6Y80oaNNXhk=",
+            "_type": "PHOTO",
+            "width": 800,
+            "photoId": 1625035573,
+            "height": 1008
+          }
+        ],
+        "reactionInfo": {}
+      },
+      {
+        "id": 115774106942637718,
+        "time": 1766572676737,
+        "type": "USER",
+        "sender": 137594677,
+        "cid": -1450499911151062,
+        "text": "",
+        "attaches": [
+          {
+            "previewData": "UklGRlgAAABXRUJQVlA4IEwAAABQBACdASooADIAP3G41GG0r6qoJWgCkC4JaQAAHFDnsOrYlxlsYT+mkrYAAP7TlVvpfsQBkBv04xmpEBBd2WgY8bu2rJlA6U8QAAAA",
+            "baseUrl": "https://i.oneme.ru/i?r=BTE2sh_eZW7g8kugOdIm2NotmU1d5kQI9eQ1J8JVLcgS_m6Sn253oldRwxOboMF83zo",
+            "photoToken": "h518rDa3qlucqGrX1Re3sFH35eyiqhscL5Cw+DPRFQbiDw6DTWl8tk8O+O6X6MUdWto0dGhMSJFDb9qc81TvK1kHdtuE8kwe1SuZj6qXkjc=",
+            "_type": "PHOTO",
+            "width": 942,
+            "photoId": 1625042485,
+            "height": 1182
+          }
+        ],
+        "reactionInfo": {}
+      }
+    ]
+  }
+}

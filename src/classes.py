@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal, Annotated, Union
 from enum import StrEnum, auto
 from pydantic import BaseModel, Field, field_validator
 from tools import OnOffBool
@@ -169,14 +169,41 @@ class ServerData(BaseModel):
     chats: List[Chat]
     config: ConfigContainer
 
-class TypeMessage(StrEnum):
-    USER = "USER"
+
+class AttachType(StrEnum):
+    CONTROL = "CONTROL"
+    PHOTO = "PHOTO"
+    FILE = "FILE"
+
+class ControlAttach(BaseModel):
+    type: Literal[AttachType.CONTROL] = Field(default=AttachType.CONTROL, alias="_type")
+    event: str
+    userId: int | None = None
+    userIds: List[int] | None = None
+    pinnedMessage: Optional["Message"] = None
+
+class PhotoAttach(BaseModel):
+    type: Literal[AttachType.PHOTO] = Field(default=AttachType.PHOTO, alias="_type")
+    photoId: int
+    baseUrl: str
+    photoToken: str
+    width: int
+    height: int
+
+class FileAttach(BaseModel):
+    type: Literal[AttachType.FILE] = Field(default=AttachType.FILE, alias="_type")
+    filename: str
+    size: int
+
+Attach = Annotated[
+    Union[ControlAttach, PhotoAttach, FileAttach],
+    Field(discriminator='type')
+]
 
 class Message(BaseModel):
     id: int
     time: datetime
-    type: TypeMessage
     sender: int
     text: str
-    attaches: List[Dict]
-    reactionInfo: Dict
+    attaches: List[Attach]
+    reactionInfo: Optional[Dict] = {}

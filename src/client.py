@@ -85,10 +85,9 @@ class Client(NetworkMixin):
         child_indent = "│" * (tab + 1)
         print(f'{indent}┌{"─"*4} {message.time.strftime("%d.%m.%Y %H:%M:%S")}')
         print(f'{child_indent}ID: {message.id}')
-        print(f'{child_indent}Type: {message.type}')
         print(f'{child_indent}Sender: [{message.sender}] {self.users_by_id[message.sender].get_name()}')
         print(f'{child_indent}Text: {message.text.replace("\n", "\n"+"│"*(tab+2))}')
-        print(f'{child_indent}Attaches: { [i["baseUrl"] for i in message.attaches] }')
+        print(f'{child_indent}Attaches: { [i.baseUrl for i in message.attaches] }')
         print(f'{child_indent}ReactionInfo: {message.reactionInfo}')
         print(f'{indent}└{"─"*6}')
 
@@ -97,9 +96,14 @@ class Client(NetworkMixin):
         chat = self.chats_by_id[chat_id]
         if not chat.participants:
             raise RuntimeError
-        await self.update_missing_users(list(chat.participants))
         chat.messages = (await self.get_messages(chat_id))
         chat.update_messages()
+
+        w = list(chat.participants).copy()
+        for i in chat.messages:
+            if i.sender not in w:
+                w.append(i.sender)
+        await self.update_missing_users(w)
         q = 0
         for i in chat.messages:
             sender_name = self.users_by_id[i.sender].get_name()
@@ -140,16 +144,6 @@ class Tuiclient(Client):
         msg_by_id = self.chats_by_id[chat_id].messages_by_id
         if msg_by_id:
             await self.get_message_info(msg_by_id[msg_id])
-        # if isinstance(chat_id, int):
-        #     for i in :
-        #         print()
-
-        # for i in await self.search("saved", 2):
-        #     Chat(**i).info()
-        # print(self.chats[0].participants)
-        # if self.chats[0].participants:
-        #     (await self.get_infos([next(iter(self.chats[0].participants.keys()))]))[0].info()
-
 
 async def main():
     q = Tuiclient()

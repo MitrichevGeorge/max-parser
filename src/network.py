@@ -51,7 +51,6 @@ class NetworkMixin:
         await self._send(19, pl.get_auth_payload(stg.ONEME_AUTH["token"]))
         await self.connection.recv()
         data = (await self._recv())['payload']
-        # _save_json("src/w.json", data)
         self._reader_task = asyncio.create_task(self._reader_loop())
         return data
 
@@ -128,7 +127,7 @@ class NetworkMixin:
         await self._send(49, {'chatId': chatID, 'from': int(d_from.timestamp() * 1000), 'forward': 0, 'backward': backward, 'getMessages': True})
         response = await self.wait_for_opcode(49)
         adapter = TypeAdapter(List[Message])
+        open("src/w3.json", "w").write(json.dumps(response, cls=UniversalEncoder, indent=2))
         return adapter.validate_python(response["payload"]["messages"])
-        # open("src/w2.json", "w").write(json.dumps(response, cls=UniversalEncoder, indent=2))
 
 
