@@ -87,30 +87,27 @@ class Client(NetworkMixin):
         print(f'{child_indent}ID: {message.id}')
         print(f'{child_indent}Sender: [{message.sender}] {self.users_by_id[message.sender].get_name()}')
         print(f'{child_indent}Text: {message.text.replace("\n", "\n"+"│"*(tab+2))}')
-        print(f'{child_indent}Attaches: { [i.baseUrl for i in message.attaches] }')
+        print(f'{child_indent}Attaches: { [i.info() for i in message.attaches] }')
         print(f'{child_indent}ReactionInfo: {message.reactionInfo}')
         print(f'{indent}└{"─"*6}')
 
     async def norm_chat(self, chat_id: int) -> list[tuple[int, str, int]]:
-        result: list[tuple[int, str, int]] = []
         chat = self.chats_by_id[chat_id]
         if not chat.participants:
             raise RuntimeError
-        chat.messages = (await self.get_messages(chat_id))
+        chat.messages = await self.get_messages(chat_id)
         chat.update_messages()
 
-        w = list(chat.participants).copy()
-        for i in chat.messages:
-            if i.sender not in w:
-                w.append(i.sender)
-        await self.update_missing_users(w)
-        q = 0
-        for i in chat.messages:
-            sender_name = self.users_by_id[i.sender].get_name()
-            date_str = i.time.strftime("%d.%m.%Y %H:%M:%S")
-            attach_str = f" [{len(i.attaches)} attaches]" if i.attaches else ""
-            result.append((q, f'[{date_str}] {sender_name}: {i.text}{attach_str}', i.id))
-            q += 1
+        unique_users = list(set(chat.participants) | {msg.sender for msg in chat.messages})
+        await self.update_missing_users(unique_users)
+
+        result: list[tuple[int, str, int]] = []
+        for index, message in enumerate(chat.messages):
+            sender_name = self.users_by_id[message.sender].get_name()
+            date_str = message.time.strftime("%d.%m.%Y %H:%M:%S")
+            attach_str = f" [{len(message.attaches)} attaches]" if message.attaches else ""
+            result.append((index, f"[{date_str}] {sender_name}: {message.text}{attach_str}", message.id))
+
         return result
 
 class Tuiclient(Client):

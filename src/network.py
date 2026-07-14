@@ -26,6 +26,7 @@ class NetworkMixin:
     def _netw_init(self):
         self.connection = None
         self.codec = PacketCodec()
+        self.is_online = False
         
         self._listeners = defaultdict(list)
         self._tasks: set[asyncio.Task] = set()
@@ -52,6 +53,7 @@ class NetworkMixin:
         await self.connection.recv()
         data = (await self._recv())['payload']
         self._reader_task = asyncio.create_task(self._reader_loop())
+        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
         return data
 
     async def _process_message(self, raw):
@@ -106,16 +108,34 @@ class NetworkMixin:
             if not self._listeners[opcode]:
                 del self._listeners[opcode]
 
+    async def _send_hartbeat(self):
+        await self._send(1, {'interactive': self.is_online})
+
+    async def _heartbeat_loop(self):
+        try:
+            while True:
+                await asyncio.sleep(30)
+                await self._send_hartbeat()
+        except asyncio.CancelledError:
+            print("Heartbeat loop stopped.")
+        except Exception as e:
+            print(f"Heartbeat error: {e}")
+
     async def disconnect(self):
+        if hasattr(self, '_heartbeat_task') and not self._heartbeat_task.done():
+            self._heartbeat_task.cancel()
+        if hasattr(self, '_reader_task') and not self._reader_task.done():
+            self._reader_task.cancel()
+        
         if self.connection:
             await self.connection.close()
             print(f"Connection to {pl.URL} closed")
 
-    async def search(self, query: str, count: int = 40):
-        await self._send(68, {'query': query, 'count': count })
-        response = await self.wait_for_opcode(68)
-        get_chats = itemgetter("chat")
-        return list(map(get_chats, response["payload"]["result"]))
+    async def search(self, query: str, count: int = 40) -> list[Chat]:
+        await self._send(60, {'query': query, 'count': count })
+        response = await self.wait_for_opcode(60)
+        adapter = TypeAdapter(list[Chat])
+        return adapter.validate_python(map(itemgetter("chat"), response["payload"]["result"]))
 
     async def get_infos(self, contactIds: List[int]) -> List[UserProfile]:
         await self._send(32, {'contactIds': contactIds})

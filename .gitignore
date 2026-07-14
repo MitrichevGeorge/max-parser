@@ -1,6 +1,5 @@
 .env
 env/
 *.pyc
-src/w.json
-src/w2.json
+src/w*.json
 logs/

@@ -1,4 +1,5 @@
-from typing import Iterable, Any
+from typing import Iterable, Any, Final
+import math
 import json
 import base64
 
@@ -58,3 +59,23 @@ def read_number(prompt: str = "", min_n: int | None = None, max_n: int | None = 
             continue
 
         return number
+
+
+BINARY_UNITS: Final[tuple[str, ...]] = ('B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB')
+DECIMAL_UNITS: Final[tuple[str, ...]] = ('B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB')
+
+def format_bytes(size_bytes: int, use_binary: bool = True, precision: int = 2) -> str:
+    if size_bytes < 0:
+        raise ValueError("Filesize cant be less than 0")
+    if size_bytes == 0:
+        return "0 B"
+
+    factor = 1024 if use_binary else 1000
+    units = BINARY_UNITS if use_binary else DECIMAL_UNITS
+    exponent = min(int(math.log(size_bytes, factor)), len(units) - 1)
+
+    if exponent == 0:
+        return f"{size_bytes} B"
+
+    value = size_bytes / (factor ** exponent)
+    return f"{value:.{precision}f} {units[exponent]}"

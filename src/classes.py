@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Literal, Annotated, Union
 from enum import StrEnum, auto
 from pydantic import BaseModel, Field, field_validator
-from tools import OnOffBool
+from tools import OnOffBool, format_bytes
 
 class NameInfo(BaseModel):
     name: str
@@ -11,9 +11,9 @@ class NameInfo(BaseModel):
     type: str
 
     def __str__(self) -> str:
-        if self.lastName:
-            return f'{self.firstName} {self.lastName}'
-        return self.firstName
+        first = (self.firstName or "").strip()
+        last = (self.lastName or "").strip()
+        return " ".join(part for part in (first, last) if part)
 
 class UserProfile(BaseModel):
     id: int
@@ -47,11 +47,7 @@ class UserProfile(BaseModel):
     def get_name(self) -> str:
         if len(self.names) == 0:
             return ""
-        name_info = self.names[0]
-        first = (name_info.firstName or "").strip()
-        last = (name_info.lastName or "").strip()
-        
-        return " ".join(part for part in (first, last) if part)
+        return str(self.names[0])
 
 class VideoConversation(BaseModel):
     joinLink: str
@@ -175,14 +171,23 @@ class AttachType(StrEnum):
     PHOTO = "PHOTO"
     FILE = "FILE"
 
-class ControlAttach(BaseModel):
+class BaseAttach(BaseModel):
+    def info(self):
+        if isinstance(self, ControlAttach):
+            return f'[C] {self.event}'
+        if isinstance(self, PhotoAttach):
+            return self.baseUrl
+        if isinstance(self, FileAttach):
+            return f'{self.name} [{format_bytes(self.size)}]'
+
+class ControlAttach(BaseAttach):
     type: Literal[AttachType.CONTROL] = Field(default=AttachType.CONTROL, alias="_type")
     event: str
     userId: int | None = None
     userIds: List[int] | None = None
     pinnedMessage: Optional["Message"] = None
 
-class PhotoAttach(BaseModel):
+class PhotoAttach(BaseAttach):
     type: Literal[AttachType.PHOTO] = Field(default=AttachType.PHOTO, alias="_type")
     photoId: int
     baseUrl: str
@@ -190,10 +195,13 @@ class PhotoAttach(BaseModel):
     width: int
     height: int
 
-class FileAttach(BaseModel):
+class FileAttach(BaseAttach):
     type: Literal[AttachType.FILE] = Field(default=AttachType.FILE, alias="_type")
-    filename: str
     size: int
+    name: str
+    fileId: int
+    token: str
+
 
 Attach = Annotated[
     Union[ControlAttach, PhotoAttach, FileAttach],

@@ -3,137 +3,778 @@
   "cmd": 1,
   "seq": 3,
   "opcode": 49,
-  "compression": 2,
+  "compression": 3,
   "payload": {
     "messages": [
       {
-        "id": 115768348260180724,
-        "time": 1766484806216,
+        "id": 116775753147303051,
+        "time": 1781856584889,
         "type": "USER",
-        "sender": 48305790,
-        "text": "\u0414\u043e\u0431\u0440\u044b\u0439 \u0434\u0435\u043d\u044c! \u041f\u0435\u0440\u0435\u0438\u043c\u0435\u043d\u0443\u0439 \u0430\u043a\u043a\u0430\u0443\u043d\u0442 \u043e\u0444\u0438\u0446\u0438\u0430\u043b\u044c\u043d\u044b\u043c\u0438 \u0434\u0430\u043d\u043d\u044b\u043c\u0438",
+        "sender": 23213419,
+        "text": "",
+        "attaches": [
+          {
+            "userIds": [
+              146383642,
+              5468415,
+              140908233,
+              151952031,
+              146042726,
+              140865687,
+              138685558,
+              50142667,
+              133473391
+            ],
+            "_type": "CONTROL",
+            "event": "new",
+            "title": "\u0424\u0438\u0437\u0442\u0435\u0445 10-11 2026/28"
+          }
+        ]
+      },
+      {
+        "id": 116775828379798264,
+        "time": 1781857732846,
+        "type": "USER",
+        "sender": 23213419,
+        "text": "",
+        "attaches": [
+          {
+            "userIds": [
+              20731287
+            ],
+            "_type": "CONTROL",
+            "event": "add"
+          }
+        ]
+      },
+      {
+        "id": 116775867554670814,
+        "time": 1781858330607,
+        "type": "USER",
+        "sender": 23213419,
+        "text": "",
+        "attaches": [
+          {
+            "fullUrl": "https://i.oneme.ru/i?r=BTFjO43w8Yr1OSJ4tcurq5HiWarlRQ8wlAs7VYen8sepjnIKYuaxEh-NoGAdzcaeyS4",
+            "_type": "CONTROL",
+            "event": "icon",
+            "url": "https://i.oneme.ru/i?r=BUFglOvkF6bn--g5U-BFgIkJN3X60TQSASsnVMiqkskG8WVYvTsW5P0Eg_GHJxeU1-7BKUB7RJZhW8KXwPeFvMtL"
+          }
+        ]
+      },
+      {
+        "id": 116775876746747238,
+        "time": 1781858470867,
+        "type": "USER",
+        "sender": 23213419,
+        "text": "",
+        "attaches": [
+          {
+            "_type": "CONTROL",
+            "event": "title",
+            "title": "\u0424\u0438\u0437\u0442\u0435\u0445 10-11 "
+          }
+        ]
+      },
+      {
+        "id": 116776077831640613,
+        "time": 1781861539179,
+        "type": "USER",
+        "sender": 23213419,
+        "text": "",
+        "attaches": [
+          {
+            "_type": "CONTROL",
+            "event": "title",
+            "title": "\u0424\u0438\u0437\u0442\u0435\u0445 10"
+          }
+        ]
+      },
+      {
+        "id": 116776089036616617,
+        "time": 1781861710153,
+        "type": "USER",
+        "sender": 23213419,
+        "text": "",
+        "attaches": [
+          {
+            "_type": "CONTROL",
+            "event": "title",
+            "title": "\u0424\u0438\u0437\u0442\u0435\u0445 10-11 2026-2028"
+          }
+        ]
+      },
+      {
+        "id": 116787098347700624,
+        "time": 1782029698909,
+        "type": "USER",
+        "sender": 151082078,
+        "text": "",
+        "attaches": [
+          {
+            "_type": "CONTROL",
+            "event": "joinByLink",
+            "userId": 151082078
+          }
+        ]
+      },
+      {
+        "id": 116787317588123886,
+        "time": 1782033044252,
+        "type": "USER",
+        "sender": 133658223,
+        "text": "",
+        "attaches": [
+          {
+            "_type": "CONTROL",
+            "event": "joinByLink",
+            "userId": 133658223
+          }
+        ]
+      },
+      {
+        "id": 116811366200785271,
+        "time": 1782399996960,
+        "type": "USER",
+        "sender": 111682799,
+        "text": "",
+        "attaches": [
+          {
+            "_type": "CONTROL",
+            "event": "joinByLink",
+            "userId": 111682799
+          }
+        ]
+      },
+      {
+        "id": 116812160418980671,
+        "time": 1782412115768,
+        "type": "USER",
+        "updateTime": 1782462106112,
+        "sender": 23213419,
+        "text": "",
+        "attaches": [],
+        "link": {
+          "type": "FORWARD",
+          "message": {
+            "id": 116811104501236160,
+            "time": 1782396003742,
+            "type": "CHANNEL",
+            "text": "",
+            "attaches": [
+              {
+                "size": 48262,
+                "_type": "FILE",
+                "name": "Math_9_2026.pdf",
+                "fileId": 3978490013,
+                "token": "f9LHodD0cOKqJUuCJdFHXc0wA1QaKY2KAW_X1X7RGmSwTunnKQpkNkC4aiGjDJNHhgbPLbcrrBThr5ZHAm0r"
+              }
+            ]
+          },
+          "chatId": -72100884107415,
+          "chatName": "\u0424\u0438\u0437\u0442\u0435\u0445 1189",
+          "chatIconUrl": "https://i.oneme.ru/i?r=BUFglOvkF6bn--g5U-BFgIkJm7oR23DrZy_txBH3XTSAe3LnkE4xEhHMYUF3Y0FgLH3BKUB7RJZhW8KXwPeFvMtL",
+          "chatAccessType": "PRIVATE"
+        },
+        "reactionInfo": {}
+      },
+      {
+        "id": 116812282320665780,
+        "time": 1782413975840,
+        "type": "USER",
+        "sender": 144420857,
+        "text": "",
+        "attaches": [
+          {
+            "_type": "CONTROL",
+            "event": "joinByLink",
+            "userId": 144420857
+          }
+        ]
+      },
+      {
+        "id": 116812403566599316,
+        "time": 1782415825906,
+        "type": "USER",
+        "sender": 173939302,
+        "text": "",
+        "attaches": [
+          {
+            "_type": "CONTROL",
+            "event": "joinByLink",
+            "userId": 173939302
+          }
+        ]
+      },
+      {
+        "id": 116815122685978183,
+        "time": 1782457316375,
+        "type": "USER",
+        "sender": 23213419,
+        "text": "\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0441\u0432\u044f\u0437\u0438: \u0443 \u0432\u0441\u0435\u0445 \u043b\u0438 \u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0442 \u041c\u0430\u043a\u0441, \u0432\u0441\u0435 \u043b\u0438 \u0432\u0438\u0434\u044f\u0442 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f: \u043f\u0440\u0438\u0448\u043b\u0438\u0442\u0435, \u043f\u043e\u0436\u0430\u043b\u0443\u0439\u0441\u0442\u0430,\u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435 \u0441 \u0444\u0430\u043c\u0438\u043b\u0438\u0435\u0439 \u0438 \u0438\u043c\u0435\u043d\u0435\u043c \u0434\u043b\u044f \u0438\u0434\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0446\u0438\u0438 \u0432 \u0447\u0430\u0442",
         "attaches": [],
         "reactionInfo": {}
       },
       {
-        "id": 115773999455227062,
-        "time": 1766571036609,
+        "id": 116815124830621775,
+        "time": 1782457349100,
         "type": "USER",
-        "sender": 137594677,
-        "cid": 1448859956332681,
+        "sender": 23213419,
+        "text": "\u0412\u043e\u0440\u043e\u043f\u0430\u0435\u0432\u0430 \u0418\u0440\u0438\u043d\u0430 \u0410\u043d\u0430\u0442\u043e\u043b\u044c\u0435\u0432\u043d\u0430",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116815125892508428,
+        "time": 1782457365303,
+        "type": "USER",
+        "sender": 5468415,
+        "text": "\u0415\u0440\u0435\u043c\u0435\u0435\u0432 \u0412\u044f\u0447\u0435\u0441\u043b\u0430\u0432",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116815127962799742,
+        "time": 1782457396893,
+        "type": "USER",
+        "sender": 20731287,
+        "text": "\u041c\u0438\u0445\u0430\u0438\u043b \u0412\u0430\u043b\u0435\u043d\u0442\u0438\u043d\u043e\u0432\u0438\u0447 \u0417\u0432\u0435\u0440\u0435\u0432",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116815216094545734,
+        "time": 1782458741677,
+        "type": "USER",
+        "sender": 133473391,
         "text": "",
         "attaches": [
           {
-            "previewData": "UklGRuIAAABXRUJQVlA4INYAAAAwBwCdASopADIAP3G0zGG0rigmJXgKapAuCWkABwOiV8u7zFPXqfkwnVr4YOkvCB5FBdLsMnfSyfWoWePkpm4FVwAA/ppFv+FU5WOmeDebidevA7yzMBtLNkKAI4C++QHsmUL0MFMredfkhW7CNGIhNEJZ0oinab+MY0YD+7b1bmdT8PW5KNe4qdzdLLrFoAc7AGXGOhJ4BKx8oD6Uy06vYb4p3+jfjtCLzQIiNAEHYpHkS90mT+YFbo7bqk5+jKfc6rb8NaxSiU8uXBoe6CnfrVFDIAAA",
-            "baseUrl": "https://i.oneme.ru/i?r=BTE2sh_eZW7g8kugOdIm2Notjq0klm_uTF_HabvStyFf9m6Sn253oldRwxOboMF83zo",
-            "photoToken": "XVShTQkMdTioyga+42TwnCDGMaa3Z1lJ8JEMcJO7fuSqvP7PcB8YKAAV/m8c6j7yapMSp/Wjv/1kaTcG9IctGKtZpKz7BxkaCQcJoawiip4=",
-            "_type": "PHOTO",
-            "width": 910,
-            "photoId": 1623272757,
-            "height": 1118
+            "_type": "CONTROL",
+            "event": "leave"
+          }
+        ]
+      },
+      {
+        "id": 116815226688012221,
+        "time": 1782458903320,
+        "type": "USER",
+        "sender": 23213419,
+        "text": "",
+        "attaches": [
+          {
+            "userIds": [
+              133473391
+            ],
+            "_type": "CONTROL",
+            "event": "add"
+          }
+        ]
+      },
+      {
+        "id": 116815406853929475,
+        "time": 1782461652434,
+        "type": "USER",
+        "sender": 173939302,
+        "text": "\u0420\u044b\u043d\u043a\u043e\u0432\u0441\u043a\u0438\u0439 \u0418\u0432\u0430\u043d",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116815509474327126,
+        "time": 1782463218297,
+        "type": "USER",
+        "sender": 151082078,
+        "text": "\u0411\u0430\u0436\u0430\u043d\u043e\u0432 \u041d\u0438\u043a\u043e\u043b\u0430\u0439",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116815535765795227,
+        "time": 1782463619473,
+        "type": "USER",
+        "sender": 133658223,
+        "text": "\u041a\u0443\u043a\u0441\u0438\u043d \u0418\u0432\u0430\u043d",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116815549230290852,
+        "time": 1782463824925,
+        "type": "USER",
+        "sender": 151952031,
+        "text": "\u041b\u0430\u0437\u0430\u0440\u0435\u0432 \u0410\u043b\u0435\u043a\u0441\u0430\u043d\u0434\u0440",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116815558058063291,
+        "time": 1782463959626,
+        "type": "USER",
+        "sender": 50142667,
+        "text": "\u0411\u0435\u043b\u043e\u0432 \u0410\u043d\u0434\u0440\u0435\u0439",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116815594068338967,
+        "time": 1782464509099,
+        "type": "USER",
+        "sender": 144420857,
+        "text": "\u0433\u043e\u0440\u0435\u0435\u0432 \u0434\u0430\u043d\u0438\u0438\u043b",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116815638826320991,
+        "time": 1782465192052,
+        "type": "USER",
+        "sender": 111682799,
+        "text": "\u0418\u0431\u0440\u0430\u0433\u0438\u043c\u043e\u0432\u0430 \u041c\u0438\u043b\u0430\u043d\u0430",
+        "attaches": [],
+        "link": {
+          "type": "REPLY",
+          "message": {
+            "id": 116815122685978183,
+            "time": 1782457316375,
+            "type": "USER",
+            "sender": 23213419,
+            "text": "\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0441\u0432\u044f\u0437\u0438: \u0443 \u0432\u0441\u0435\u0445 \u043b\u0438 \u0440\u0430\u0431\u043e\u0442\u0430\u0435\u0442 \u041c\u0430\u043a\u0441, \u0432\u0441\u0435 \u043b\u0438 \u0432\u0438\u0434\u044f\u0442 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f: \u043f\u0440\u0438\u0448\u043b\u0438\u0442\u0435, \u043f\u043e\u0436\u0430\u043b\u0443\u0439\u0441\u0442\u0430,\u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435 \u0441 \u0444\u0430\u043c\u0438\u043b\u0438\u0435\u0439 \u0438 \u0438\u043c\u0435\u043d\u0435\u043c \u0434\u043b\u044f \u0438\u0434\u0435\u043d\u0442\u0438\u0444\u0438\u043a\u0430\u0446\u0438\u0438 \u0432 \u0447\u0430\u0442",
+            "attaches": []
+          },
+          "chatId": 0
+        },
+        "reactionInfo": {}
+      },
+      {
+        "id": 116815667079771583,
+        "time": 1782465623165,
+        "type": "USER",
+        "sender": 23213419,
+        "text": "",
+        "attaches": [
+          {
+            "_type": "CONTROL",
+            "event": "remove",
+            "userId": 133473391
+          }
+        ]
+      },
+      {
+        "id": 116815668927679226,
+        "time": 1782465651362,
+        "type": "USER",
+        "sender": 140908233,
+        "text": "\u041a\u0430\u043f\u0440\u0430\u043b\u043e\u0432 \u0422\u0438\u043c\u043e\u0444\u0435\u0439",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116816768724505332,
+        "time": 1782482432930,
+        "type": "USER",
+        "sender": 140865687,
+        "text": "\u0423\u0441\u0442\u0438\u043d\u043e\u0432 \u041a\u0438\u0440\u0438\u043b\u043b",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116817386042257423,
+        "time": 1782491852451,
+        "type": "USER",
+        "sender": 138685558,
+        "text": "\u0421\u043e\u043b\u043e\u043c\u0430\u0445\u0438\u043d \u041f\u0451\u0442\u0440",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116820644642512072,
+        "time": 1782541574745,
+        "type": "USER",
+        "sender": 23213419,
+        "text": "",
+        "attaches": [
+          {
+            "userIds": [
+              140450153
+            ],
+            "_type": "CONTROL",
+            "event": "add"
+          }
+        ]
+      },
+      {
+        "id": 116823368794403733,
+        "time": 1782583142004,
+        "type": "USER",
+        "sender": 136554055,
+        "text": "",
+        "attaches": [
+          {
+            "_type": "CONTROL",
+            "event": "joinByLink",
+            "userId": 136554055
+          }
+        ]
+      },
+      {
+        "id": 116823371305090951,
+        "time": 1782583180314,
+        "type": "USER",
+        "sender": 136554055,
+        "text": "\u0424\u0451\u0434\u043e\u0440 \u0423\u0442\u043a\u0438\u043d",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116823566362354384,
+        "time": 1782586156652,
+        "type": "USER",
+        "sender": 23213419,
+        "text": "",
+        "attaches": [
+          {
+            "_type": "CONTROL",
+            "event": "title",
+            "title": "\u0424\u0438\u0437\u0442\u0435\u0445 10\u0437"
+          }
+        ]
+      },
+      {
+        "id": 116826601981238356,
+        "time": 1782632476520,
+        "type": "USER",
+        "sender": 23213419,
+        "text": "",
+        "attaches": [
+          {
+            "userIds": [
+              133815656
+            ],
+            "_type": "CONTROL",
+            "event": "add"
+          }
+        ]
+      },
+      {
+        "id": 116826626365552838,
+        "time": 1782632848595,
+        "type": "USER",
+        "sender": 133815656,
+        "text": "\u041f\u0430\u0443\u0448\u043a\u0438\u043d \u041f\u0430\u0432\u0435\u043b",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116829595014611146,
+        "time": 1782678146585,
+        "type": "USER",
+        "sender": 137594677,
+        "cid": 96523678801,
+        "text": "",
+        "attaches": [
+          {
+            "_type": "CONTROL",
+            "event": "joinByLink",
+            "userId": 137594677
+          }
+        ]
+      },
+      {
+        "id": 116829623589426093,
+        "time": 1782678582602,
+        "type": "USER",
+        "updateTime": 1782697580988,
+        "status": "EDITED",
+        "sender": 23213419,
+        "text": "\u0413\u0435\u043e\u0440\u0433\u0438\u0439 \u041c\u0438\u0442\u0440\u0438\u0447\u0435\u0432 \u043f\u0440\u0438\u0441\u043e\u0435\u0434\u0438\u043d\u0438\u043b\u0441\u044f \u043a \u0447\u0430\u0442\u0443",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116832552363784185,
+        "time": 1782723272152,
+        "type": "USER",
+        "sender": 328492811,
+        "text": "",
+        "attaches": [
+          {
+            "_type": "CONTROL",
+            "event": "joinByLink",
+            "userId": 328492811
+          }
+        ]
+      },
+      {
+        "id": 116832554635113097,
+        "time": 1782723306810,
+        "type": "USER",
+        "sender": 328492811,
+        "text": "\u0422\u0438\u0445\u043e\u043c\u0438\u0440\u043e\u0432\u0430 \u0412\u0435\u0440\u0430",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116833067962732534,
+        "time": 1782731139568,
+        "type": "USER",
+        "sender": 351510788,
+        "text": "",
+        "attaches": [
+          {
+            "_type": "CONTROL",
+            "event": "joinByLink",
+            "userId": 351510788
+          }
+        ]
+      },
+      {
+        "id": 116833069557578222,
+        "time": 1782731163903,
+        "type": "USER",
+        "sender": 351510788,
+        "text": "\u0410\u043d\u043d\u0430 \u0424\u0440\u043e\u043b\u043e\u0432\u0430",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116833497746914407,
+        "time": 1782737697554,
+        "type": "USER",
+        "sender": 23213419,
+        "text": "",
+        "attaches": [
+          {
+            "userIds": [
+              184143356
+            ],
+            "_type": "CONTROL",
+            "event": "add"
+          }
+        ]
+      },
+      {
+        "id": 116833563519443674,
+        "time": 1782738701163,
+        "type": "USER",
+        "sender": 152837794,
+        "text": "",
+        "attaches": [
+          {
+            "_type": "CONTROL",
+            "event": "joinByLink",
+            "userId": 152837794
+          }
+        ]
+      },
+      {
+        "id": 116833589679513707,
+        "time": 1782739100334,
+        "type": "USER",
+        "sender": 152837794,
+        "text": "\u0410\u043b\u0435\u043a\u0441\u0430\u043d\u0434\u0440 \u0411\u0443\u0446\u043a\u0438\u0439",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116833706205335418,
+        "time": 1782740878377,
+        "type": "USER",
+        "sender": 184143356,
+        "text": "\u0413\u0435\u043e\u0440\u0433\u0438\u0439 \u0412\u0435\u0440\u0445\u043e\u0432\u0441\u043a\u0438\u0439",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116835459850133976,
+        "time": 1782767636873,
+        "type": "USER",
+        "sender": 140450153,
+        "text": "\u041f\u043e\u0441\u043f\u0435\u043b\u043e\u0432 \u0418\u043b\u044c\u044f",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116838144392898226,
+        "time": 1782808599745,
+        "type": "USER",
+        "sender": 146042726,
+        "text": "\u0418\u0432\u0430\u043d\u043e\u0432 \u041a\u0438\u0440\u0438\u043b\u043b",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116841833853247410,
+        "time": 1782864896442,
+        "type": "USER",
+        "sender": 23213419,
+        "text": "",
+        "attaches": [
+          {
+            "userIds": [
+              354087164
+            ],
+            "_type": "CONTROL",
+            "event": "add"
+          }
+        ]
+      },
+      {
+        "id": 116843864981590328,
+        "time": 1782895889001,
+        "type": "USER",
+        "sender": 354087164,
+        "text": "\u0420\u0443\u0431\u0446\u043e\u0432 \u0410\u043d\u0434\u0440\u0435\u0439",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116845882143028941,
+        "time": 1782926668442,
+        "type": "USER",
+        "sender": 142319768,
+        "text": "",
+        "attaches": [
+          {
+            "_type": "CONTROL",
+            "event": "joinByLink",
+            "userId": 142319768
+          }
+        ]
+      },
+      {
+        "id": 116845885442035261,
+        "time": 1782926718781,
+        "type": "USER",
+        "sender": 142319768,
+        "text": "\u0428\u0438\u0442\u0443\u0445\u0438\u043d \u0413\u0435\u043e\u0440\u0433\u0438\u0439",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116849047330165447,
+        "time": 1782974965365,
+        "type": "USER",
+        "sender": 146383642,
+        "text": "\u041f\u0430\u043d\u0444\u0438\u043b\u043e\u0432\u0430 \u0422\u0430\u0438\u0441\u0438\u044f",
+        "attaches": [],
+        "reactionInfo": {}
+      },
+      {
+        "id": 116850636556288373,
+        "time": 1782999215031,
+        "type": "USER",
+        "updateTime": 1782999759803,
+        "sender": 23213419,
+        "text": "",
+        "attaches": [
+          {
+            "size": 1720966,
+            "_type": "FILE",
+            "name": "solving_problems_genetics.pdf",
+            "fileId": 4055900233,
+            "token": "f9LHodD0cOK6wDMxyno8Bex8Vtousw9FcENi0T-Z5uECNI2eYHbCQDo0kTJc_MR5aYuAsEYcKFoyzl5ySF9n"
           }
         ],
         "reactionInfo": {}
       },
       {
-        "id": 115774001109221549,
-        "time": 1766571061847,
+        "id": 116850653152899885,
+        "time": 1782999468275,
         "type": "USER",
-        "sender": 137594677,
-        "cid": -1448885533591310,
-        "text": "",
-        "attaches": [
-          {
-            "previewData": "UklGRvAAAABXRUJQVlA4IOQAAAAQCACdASooADIAP12UwFiyqiclMrtuYlAriWcADCGzNAOx8TpA6Xja4iT8SbY4VwXti8ZkFZzYdGZIAGelSvd6vtk4wnPa9GDAAP7TlcuLKpsj1HDLbxkoZLP2++z9th7Rg8ZCon99JcJ0gGjWCOE9LYW0uctjzI1u0HBjH0U78TWBGb0w16QOkGzj9QkPUCqrs310Arzm1GmjR/yRoJc/MT6JCbR8htQvFkAJHQBwMosX/3VrQKPL0er6OAD5IraNmgq8cKF7zvlRBHVdrHrJQdJxErOiue6uyo3mZnG2AjgAAAA=",
-            "baseUrl": "https://i.oneme.ru/i?r=BTE2sh_eZW7g8kugOdIm2Notqv6j5olV329DOJXLJWpz8m6Sn253oldRwxOboMF83zo",
-            "photoToken": "iXmdwi8qsJqXkC6aQNX1qU/ukQPJsevAr+SqucLTjd60IWGnaokgPAuGhy3tBi5mki2Y/IHVli6cevemhj1HLjmec7paop0VOD2goyYkfZJsSgimmtuJKhBXEn6Q270E",
-            "_type": "PHOTO",
-            "width": 886,
-            "photoId": 1623296053,
-            "height": 1116
-          }
-        ],
+        "updateTime": 1783001724824,
+        "status": "EDITED",
+        "sender": 23213419,
+        "text": "\ud83c\udfd6 \u0414\u0437 \u043d\u0430 \u043b\u0435\u0442\u043e: \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u0442\u044c \u0433\u043b\u0430\u0432\u044b 2-8, \u0440\u0435\u0448\u0438\u0442\u044c \u043f\u043e 3 \u043b\u044e\u0431\u044b\u0445 \u0437\u0430\u0434\u0430\u0447\u0438 \u043f\u043e\u0441\u043b\u0435 \u043a\u0430\u0436\u0434\u043e\u0439 \u0433\u043b\u0430\u0432\u044b \u0432 \u043e\u0442\u0434\u0435\u043b\u044c\u043d\u043e\u0439 \u0442\u0435\u0442\u0440\u0430\u0434\u0438 48 \u043b\u0438\u0441\u0442\u043e\u0432.\n\u041f\u0440\u043e\u0434\u0432\u0438\u043d\u0443\u0442\u044b\u043c \u0432 \u0433\u0435\u043d\u0435\u0442\u0438\u043a\u0435 \u0440\u0435\u0431\u044f\u0442\u0430\u043c \u0440\u0435\u043a\u043e\u043c\u0435\u043d\u0434\u0443\u044e \u043f\u043e\u0440\u0435\u0448\u0430\u0442\u044c \u0437\u0430\u0434\u0430\u0447\u0438 \u0441\u043e \u0437\u0432\u0435\u0437\u0434\u043e\u0447\u043a\u0430\u043c\u0438 \u0434\u043b\u044f \u0438\u043d\u0442\u0435\u0440\u0435\u0441\u0430 \ud83e\uddad",
+        "attaches": [],
+        "link": {
+          "type": "REPLY",
+          "message": {
+            "id": 116850636556288373,
+            "time": 1782999215031,
+            "type": "USER",
+            "updateTime": 1782999759803,
+            "sender": 23213419,
+            "text": "",
+            "attaches": [
+              {
+                "size": 1720966,
+                "_type": "FILE",
+                "name": "solving_problems_genetics.pdf",
+                "fileId": 4055900233,
+                "token": "f9LHodD0cOIC5rd7ZaRzL0fxYXww-2dABaxQvY_q8DShvMjdVnR4qeaKEZEInTzCXlQbQzb9FFDWi0bn2nqa"
+              }
+            ]
+          },
+          "chatId": 0
+        },
         "reactionInfo": {}
       },
       {
-        "id": 115774090750546382,
-        "time": 1766572429665,
+        "id": 116850671119724253,
+        "time": 1782999742427,
         "type": "USER",
-        "sender": 137594677,
-        "cid": -1450252159733466,
-        "text": "",
+        "sender": 23213419,
+        "text": "Pinned chat message changed",
         "attaches": [
           {
-            "previewData": "UklGRqQAAABXRUJQVlA4IJgAAAAwBQCdASomADIAP2WmxVizLrmjrVme2zAsiWdsGV8U+gAjANA/EM7QxMMVkw0vzQF2AAD+30Y/zM61CkzJs9NZbDZRuheS5XDpIikLLysb2ox7XGr4fDFQB08o2h8yAphd2LtaE2tTLx8kncTSjhIzJEAknO+txW/0/GUUjHOAx2ecgoNwLSxF7uUfTEXoIGctvjSN3HAAAA==",
-            "baseUrl": "https://i.oneme.ru/i?r=BTE2sh_eZW7g8kugOdIm2NotubbIdgyyU3JTXQX9-Xw8MW6Sn253oldRwxOboMF83zo",
-            "photoToken": "r6IkndZPpRm9BL12MTmtewXCOmtrFyzW6SCgMij+mDGFjcBY0gCO1kbg5hUbA5y7HQr8aSzUBj+twp4Cwuj5AhtAsUP1frOU",
-            "_type": "PHOTO",
-            "width": 750,
-            "photoId": 1624797493,
-            "height": 982
+            "pinnedMessage": {
+              "id": 116850636556288373,
+              "time": 1782999215031,
+              "type": "USER",
+              "sender": 23213419,
+              "text": "",
+              "attaches": [
+                {
+                  "size": 1720966,
+                  "_type": "FILE",
+                  "name": "solving_problems_genetics.pdf",
+                  "fileId": 4055900233,
+                  "token": "f9LHodD0cOLn2X2VEsk-n2OiFX0fPxfD-h-Ze9eHDFrL159on1lqvH3eLFkNXwHfKU_kl4HAhqITUJb0WuPT"
+                }
+              ]
+            },
+            "_type": "CONTROL",
+            "event": "pin"
           }
-        ],
-        "reactionInfo": {}
+        ]
       },
       {
-        "id": 115774105113025580,
-        "time": 1766572648819,
+        "id": 116850672257035997,
+        "time": 1782999759781,
         "type": "USER",
-        "sender": 137594677,
-        "cid": 1450472889867853,
-        "text": "",
+        "sender": 23213419,
+        "text": "Pinned chat message changed",
         "attaches": [
           {
-            "previewData": "UklGRr4AAABXRUJQVlA4ILIAAAAwBwCdASoiADIAP3Gsyl00rSgkqrgLApAuCWkABwMqA9R9vywj7UDnkMwYbRJnZNhIX7PbcdOjL/nrCb9izJeynkAA/t7sJ/35/byiZ5gZb04s3C0Y0DLKN3bYcvyqX1ZKCAqA5+R2nLL+MR2WnLVKPIdeWQa7H+WCZFgG8peQkpSOHQhzU6RDhyBZ7FwiDMZ0NrN0orDI7RmRdiaI1mkMshc9PYWnHNZrSx5BO1miEAAA",
-            "baseUrl": "https://i.oneme.ru/i?r=BTE2sh_eZW7g8kugOdIm2NotfejryCIF01TkgvFCUBZtJ26Sn253oldRwxOboMF83zo",
-            "photoToken": "C8D5q75AOejsZ/K1HPfW1xDrlBbox2k3+d4oAPgDdH0idk/sV6kXojxrLv9GmERMYItmgTqhtKOcNY9U3peBrtxd9v4jI4kMenqifmVE2og=",
-            "_type": "PHOTO",
-            "width": 750,
-            "photoId": 1625018165,
-            "height": 1092
+            "pinnedMessage": {
+              "id": 116850653152899885,
+              "time": 1782999468275,
+              "type": "USER",
+              "sender": 23213419,
+              "text": "\u0414\u0437 \u043d\u0430 \u043b\u0435\u0442\u043e: \u0433\u043b\u0430\u0432\u044b 2-9, \u0440\u0435\u0448\u0438\u0442\u044c \u043f\u043e 5 \u043b\u044e\u0431\u044b\u0445 \u0437\u0430\u0434\u0430\u0447 \u0438\u0437 \u043a\u0430\u0436\u0434\u043e\u0439 \u0433\u043b\u0430\u0432\u044b \u0432 \u043e\u0442\u0434\u0435\u043b\u044c\u043d\u043e\u0439 \u0442\u0435\u0442\u0440\u0430\u0434\u0438 48 \u043b\u0438\u0441\u0442\u043e\u0432",
+              "attaches": []
+            },
+            "_type": "CONTROL",
+            "event": "pin"
           }
-        ],
-        "reactionInfo": {}
+        ]
       },
       {
-        "id": 115774106328571586,
-        "time": 1766572667367,
+        "id": 116894027755126717,
+        "time": 1783661312181,
         "type": "USER",
-        "sender": 137594677,
-        "cid": 1450490186196639,
+        "sender": 23213419,
         "text": "",
         "attaches": [
           {
-            "previewData": "UklGRs4AAABXRUJQVlA4IMIAAADQBgCdASooADIAP3GWwVi0qaajsrbeYpAuCWlnewMtcWlW+z59VGFzvrKuPKWBZvDvtEBdo14RQGYpqO+WigAA/sppw6rrDY9sKl/n05jsnZvP1sAl9na68UfRLalsRpfoodwvbGsif0UMppJunu24PTuS0A+1vxaunIdDQm4LLJWlKezMYd6YLhKnW7AbHnTeJb4GOGOhXKvlNJjR1PRa1RemZkdFIHpVzSoO2xVPwhgoCwmOzJjh8KiQFXdFTroAAA==",
-            "baseUrl": "https://i.oneme.ru/i?r=BTE2sh_eZW7g8kugOdIm2Nothq3SiE44iawI2_ZzbH_VBm6Sn253oldRwxOboMF83zo",
-            "photoToken": "ATkWQTObsp4dvmW8xk51eZ9bymunhv4BU83m9lCRnoBMgYcmC1en3srbnaOMEQhC6O7lXUszifiJZR6qtwr3gKkmooyRNp6P6Y80oaNNXhk=",
-            "_type": "PHOTO",
-            "width": 800,
-            "photoId": 1625035573,
-            "height": 1008
+            "userIds": [
+              133473391
+            ],
+            "_type": "CONTROL",
+            "event": "add"
           }
-        ],
-        "reactionInfo": {}
-      },
-      {
-        "id": 115774106942637718,
-        "time": 1766572676737,
-        "type": "USER",
-        "sender": 137594677,
-        "cid": -1450499911151062,
-        "text": "",
-        "attaches": [
-          {
-            "previewData": "UklGRlgAAABXRUJQVlA4IEwAAABQBACdASooADIAP3G41GG0r6qoJWgCkC4JaQAAHFDnsOrYlxlsYT+mkrYAAP7TlVvpfsQBkBv04xmpEBBd2WgY8bu2rJlA6U8QAAAA",
-            "baseUrl": "https://i.oneme.ru/i?r=BTE2sh_eZW7g8kugOdIm2NotmU1d5kQI9eQ1J8JVLcgS_m6Sn253oldRwxOboMF83zo",
-            "photoToken": "h518rDa3qlucqGrX1Re3sFH35eyiqhscL5Cw+DPRFQbiDw6DTWl8tk8O+O6X6MUdWto0dGhMSJFDb9qc81TvK1kHdtuE8kwe1SuZj6qXkjc=",
-            "_type": "PHOTO",
-            "width": 942,
-            "photoId": 1625042485,
-            "height": 1182
-          }
-        ],
-        "reactionInfo": {}
+        ]
       }
     ]
   }
