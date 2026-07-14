@@ -1,5 +1,5 @@
 import asyncio
-from classes import ConfigContainer, Message, UserProfile, Chat, ServerData
+from classes import AttachType, ConfigContainer, Message, UserProfile, Chat, ServerData
 import payloads as pl
 from typing import Any, Dict, List
 from operator import itemgetter
@@ -79,7 +79,7 @@ class Client(NetworkMixin):
 
         return [format_chat(chat, idx) for idx, chat in enumerate(self.chats)]
 
-    async def get_message_info(self, message: Message, tab: int = 0):
+    async def message_info(self, message: Message, tab: int = 0):
         await self.update_missing_users([message.sender])
         indent = "│" * tab
         child_indent = "│" * (tab + 1)
@@ -140,7 +140,12 @@ class Tuiclient(Client):
         msg_id = norm_chat[read_number(min_n=0, max_n=(len(norm_chat) - 1))][2]
         msg_by_id = self.chats_by_id[chat_id].messages_by_id
         if msg_by_id:
-            await self.get_message_info(msg_by_id[msg_id])
+            message = msg_by_id[msg_id]
+            if len(message.attaches) > 0:
+                if message.attaches[0].type == AttachType.FILE:
+                    print(await self.get_file_url(message.attaches[0].fileId, chat_id, message.id))
+            await self.message_info(message)
+
 
 async def main():
     q = Tuiclient()
