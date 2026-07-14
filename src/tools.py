@@ -4,7 +4,10 @@ import json
 import base64
 
 def any_without(lst: Iterable, val: Any) -> Any:
-    return next(iter(set(lst) - {val}), val)
+    for x in lst:
+        if x != val:
+            return x
+    return val
 
 class UniversalEncoder(json.JSONEncoder):
     def default(self, o: Any):
@@ -39,26 +42,43 @@ OnOffBool = Annotated[
     PlainSerializer(serialize_on_off, return_type=str)
 ]
 
-def read_number(prompt: str = "", min_n: int | None = None, max_n: int | None = None) -> int:
-    while True:
-        if not (user_input := input(f"{prompt} -> ").strip()):
-            print("Input cannot be blank.")
-            continue
 
+from prompt_toolkit.shortcuts import PromptSession
+from prompt_toolkit.validation import Validator, ValidationError
+
+class NumberValidator(Validator):
+    def __init__(self, min_n: int | None = None, max_n: int | None = None):
+        self.min_n = min_n
+        self.max_n = max_n
+
+    def validate(self, document):
+        text = document.text.strip()
+        if not text:
+            raise ValidationError(message="Input cannot be blank.")
+        
         try:
-            number = int(user_input)
+            value = int(text)
         except ValueError:
-            print("Input must be a valid integer.")
-            continue
+            raise ValidationError(message="Input must be a valid integer.")
 
-        if min_n is not None and number < min_n:
-            print(f"Number must be greater than or equal to {min_n}.")
-            continue
-        if max_n is not None and number > max_n:
-            print(f"Number must be less than or equal to {max_n}.")
-            continue
+        if self.min_n is not None and value < self.min_n:
+            raise ValidationError(message=f"Number must be >= {self.min_n}.")
+        if self.max_n is not None and value > self.max_n:
+            raise ValidationError(message=f"Number must be <= {self.max_n}.")
 
-        return number
+_session = PromptSession()
+
+async def ask(prompt_text: str = "> ", validator: Validator | None = None) -> str:
+    try:
+        return await _session.prompt_async(prompt_text, validator=validator)
+    except (EOFError, KeyboardInterrupt):
+        print("\nCancelled by user.")
+        exit(0)
+
+async def read_number( prompt: str = "", min_n: int | None = None, max_n: int | None = None) -> int:
+    validator = NumberValidator(min_n, max_n)
+    user_input = await ask(f"{prompt} -> ", validator=validator)
+    return int(user_input.strip())
 
 
 BINARY_UNITS: Final[tuple[str, ...]] = ('B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB')
@@ -79,3 +99,4 @@ def format_bytes(size_bytes: int, use_binary: bool = True, precision: int = 2) -
 
     value = size_bytes / (factor ** exponent)
     return f"{value:.{precision}f} {units[exponent]}"
+

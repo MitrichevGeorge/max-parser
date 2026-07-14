@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     ONEME_DEVICE_ID: str = Field(default="q")
     ONEME_AUTH: dict = Field(default_factory=dict)
+    LOGS_PORT: int = Field(default=8080)
 
     model_config = SettingsConfigDict(
         env_file=".env", 

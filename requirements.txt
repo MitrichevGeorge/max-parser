@@ -1,3 +1,4 @@
 websockets
 pydantic-settings
 loguru
+prompt_toolkit

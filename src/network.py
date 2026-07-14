@@ -41,6 +41,7 @@ class NetworkMixin:
         return self.codec.bytes_to_payload(raw)
 
     async def _send(self, opcode: int, payload):
+        logger.info(f"↑ {opcode} {payload}")
         if not isinstance(self.connection, websockets.ClientConnection):
             raise RuntimeError("Client not connected")
         await self.connection.send(self.codec.payload_to_bytes(opcode, payload))
@@ -62,8 +63,9 @@ class NetworkMixin:
                 if not isinstance(raw, bytes):
                     print("It is not bytes")
                     return
-                logger.info(base64.b64encode(raw))
+                
                 msg = self.codec.bytes_to_payload(raw)
+                logger.info(f"↓ {msg}")
                 if msg.get("cmd") == 1:
                     opcode = msg.get("opcode")
                     if opcode in self._listeners:
@@ -108,16 +110,14 @@ class NetworkMixin:
             if not self._listeners[opcode]:
                 del self._listeners[opcode]
 
-    async def _send_hartbeat(self):
-        await self._send(1, {'interactive': self.is_online})
-
     async def _heartbeat_loop(self):
         try:
+            print("hartbeat loop started")
             while True:
                 await asyncio.sleep(30)
-                await self._send_hartbeat()
+                await self._send(1, {'interactive': self.is_online})
         except asyncio.CancelledError:
-            print("Heartbeat loop stopped.")
+            print("Heartbeat loop stopped")
         except Exception as e:
             print(f"Heartbeat error: {e}")
 

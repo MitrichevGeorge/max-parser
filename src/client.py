@@ -6,7 +6,10 @@ from operator import itemgetter
 from loguru import logger
 import sys
 from network import NetworkMixin
-from tools import any_without, read_number
+from tools import any_without, read_number, ask
+from settings import stg
+import socket
+from prompt_toolkit.patch_stdout import patch_stdout
 
 
 class Client(NetworkMixin):
@@ -119,7 +122,17 @@ class Tuiclient(Client):
             level="INFO",
             encoding="utf-8"
         )
-        logger.add(sys.stdout, colorize=True, format="<green>{time:HH:mm:ss}</green> | {level} | {message}")
+        try:
+            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            client_socket.connect(('localhost', stg.LOGS_PORT))
+            print(f"Connected to logserver(port {stg.LOGS_PORT})")
+            logger.add(lambda msg: client_socket.sendall(msg.encode('utf-16')), format="{message}", level="INFO")
+            # client_socket.close()
+        except ConnectionRefusedError:
+            print(f"Logserver not running(port {stg.LOGS_PORT}). Logging here")
+            logger.add(sys.stdout, colorize=True, format="<green>{time:HH:mm:ss}</green> | {level} | {message}")
+
+
 
     async def begin(self):
         await self._init_log()
@@ -130,14 +143,14 @@ class Tuiclient(Client):
         for i in norm_chatlist:
             print(f'{i[0]}) {i[1]}')
         
-        chat_id = norm_chatlist[read_number(min_n=0, max_n=(len(norm_chatlist) - 1))][2]
+        chat_id = norm_chatlist[await read_number(min_n=0, max_n=(len(norm_chatlist) - 1))][2]
         if not isinstance(chat_id, int):
             raise ValueError
         self.chats_by_id[chat_id].info()
         norm_chat = await self.norm_chat(chat_id)
         for i in norm_chat:
             print(f'{i[0]}) {i[1]}')
-        msg_id = norm_chat[read_number(min_n=0, max_n=(len(norm_chat) - 1))][2]
+        msg_id = norm_chat[await read_number(min_n=0, max_n=(len(norm_chat) - 1))][2]
         msg_by_id = self.chats_by_id[chat_id].messages_by_id
         if msg_by_id:
             message = msg_by_id[msg_id]
@@ -148,9 +161,10 @@ class Tuiclient(Client):
 
 
 async def main():
-    q = Tuiclient()
-    await q.begin()
-    await q.disconnect()
+    with patch_stdout(raw=True):
+        q = Tuiclient()
+        await q.begin()
+        await q.disconnect()
 
 if __name__ == "__main__":
     asyncio.run(main())
