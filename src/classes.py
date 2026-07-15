@@ -215,6 +215,7 @@ class AttachType(StrEnum):
     CONTROL = "CONTROL"
     PHOTO = "PHOTO"
     FILE = "FILE"
+    VIDEO = "VIDEO"
 
 class BaseAttach(BaseModel):
     def info(self):
@@ -224,6 +225,8 @@ class BaseAttach(BaseModel):
             return self.baseUrl
         if isinstance(self, FileAttach):
             return f'{self.name} [{format_bytes(self.size)}]'
+        if isinstance(self, VideoAttach):
+            return f'[V] {self.description} [{self.thumbnail}] {self.width}x{self.height}'
 
 class ControlAttach(BaseAttach):
     type: Literal[AttachType.CONTROL] = Field(default=AttachType.CONTROL, alias="_type")
@@ -240,6 +243,18 @@ class PhotoAttach(BaseAttach):
     width: int
     height: int
 
+class VideoAttach(BaseAttach):
+    type: Literal[AttachType.VIDEO] = Field(default=AttachType.VIDEO, alias="_type")
+    previewData: bytes
+    duration: int
+    thumbnail: str
+    videoType: int
+    width: int
+    height: int
+    description: str
+    videoId: int
+    token: str
+
 class FileAttach(BaseAttach):
     type: Literal[AttachType.FILE] = Field(default=AttachType.FILE, alias="_type")
     size: int
@@ -247,9 +262,8 @@ class FileAttach(BaseAttach):
     fileId: int
     token: str
 
-
 Attach = Annotated[
-    Union[ControlAttach, PhotoAttach, FileAttach],
+    Union[ControlAttach, PhotoAttach, VideoAttach, FileAttach],
     Field(discriminator='type')
 ]
 

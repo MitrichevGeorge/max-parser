@@ -164,9 +164,8 @@ class Tuiclient(Client):
     async def begin(self):
         await self._init_log()
         await self.connect()
-
         while True:
-            match await sel(["Profile info", "contacts", "Chats list", "Limits and config", "Get user by id", "Exit"], "Main menu"):
+            match await sel(["Profile info", "Contacts", "Chats list", "Limits and config", "Get user by id", "Exit"], "Main menu"):
                 case 0:
                     self.profile.info()
                 case 1:

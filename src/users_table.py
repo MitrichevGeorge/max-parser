@@ -39,16 +39,18 @@ class ScrapingState:
     total_ids: int = field(init=False)
 
     cooldown_seconds: float = 10.0
+    reconnect_cooldown_seconds: float = 20.0
     start_time: float = field(default_factory=time.time)
     last_batch_time: float = field(default_factory=time.time)
     avg_batch_duration: float = 0.0
     batch_count: int = 0
+    last_broadcasted_batch_idx: int = 0
 
     current_action: str = "idle"
     action_started_at: float = field(default_factory=time.time)
     action_duration_estimate: float = 0.0
     action_progress: float = 0.0
-    action_detail: str = "" 
+    action_detail: str = ""
 
     is_running: bool = False
     is_paused: bool = False
@@ -56,15 +58,65 @@ class ScrapingState:
     last_error: Optional[str] = None
 
     reinit_logs: List[Dict[str, Any]] = field(default_factory=list)
+    batch_logs: List[Dict[str, Any]] = field(default_factory=list)
     max_log_entries: int = 100
 
     users_scraped: int = 0
     excel_path: str = "users_table.xlsx"
 
+    first_user_id: Optional[int] = None
+    last_user_id: Optional[int] = None
+
+    last_iteration_duration: Optional[float] = None
+    last_batch_user_count: int = 0
+
     ws_clients: Set[web.WebSocketResponse] = field(default_factory=set)
 
     def __post_init__(self):
-        self.total_ids = self.id_max - self.id_min
+        self.update_total_ids()
+        self.update_excel_path()
+
+    def update_total_ids(self) -> None:
+        self.total_ids = max(0, self.id_max - self.id_min)
+
+    def update_excel_path(self) -> None:
+        """Set file name based on actual first/last user IDs written to the sheet."""
+        first = self.first_user_id
+        last = self.last_user_id
+        if first is None or last is None:
+            first = self.id_min
+            last = self.id_max
+        self.excel_path = f"users_table_{first}_{last}.xlsx"
+
+    def set_range(self, id_min: int, id_max: int, id_step: int) -> None:
+        """Update scanning range, recalculate progress and target file name."""
+        self.id_min = id_min
+        self.id_max = id_max
+        self.id_step = id_step
+        self.update_total_ids()
+        self.update_excel_path()
+
+    def add_reinit_log(self, message: str) -> None:
+        entry = {
+            "timestamp": datetime.datetime.now().strftime("%H:%M:%S"),
+            "message": message,
+        }
+        self.reinit_logs.append(entry)
+        if len(self.reinit_logs) > self.max_log_entries:
+            self.reinit_logs.pop(0)
+
+    def add_batch_log(self, start_id: int, end_id: int, count: int, duration: float) -> None:
+        entry = {
+            "timestamp": datetime.datetime.now().strftime("%H:%M:%S"),
+            "message": f"Батч {start_id:,} — {end_id:,}: {count} пользователей за {duration:.2f}с",
+            "start_id": start_id,
+            "end_id": end_id,
+            "count": count,
+            "duration": duration,
+        }
+        self.batch_logs.append(entry)
+        if len(self.batch_logs) > self.max_log_entries:
+            self.batch_logs.pop(0)
 
     def set_action(self, action: str, duration_estimate: float = 0.0, detail: str = "") -> None:
         """Set current action with optional duration estimate for progress bar."""
@@ -104,8 +156,10 @@ class ScrapingState:
             "current_id": self.current_id,
             "id_min": self.id_min,
             "id_max": self.id_max,
+            "id_step": self.id_step,
             "progress_percent": round(self.progress_percent, 2),
             "cooldown_seconds": self.cooldown_seconds,
+            "reconnect_cooldown_seconds": self.reconnect_cooldown_seconds,
             "is_running": self.is_running,
             "is_paused": self.is_paused,
             "is_saving": self.is_saving,
@@ -114,6 +168,11 @@ class ScrapingState:
             "elapsed_seconds": round(time.time() - self.start_time, 1),
             "last_error": self.last_error,
             "reinit_logs": self.reinit_logs[-20:],
+            "batch_logs": self.batch_logs[-20:],
+            "batch_counts": [log["count"] for log in self.batch_logs[-50:]],
+            "last_broadcasted_batch_idx": self.last_broadcasted_batch_idx,
+            "iteration_duration": self.last_iteration_duration,
+            "excel_path": self.excel_path,
             "current_action": self.current_action,
             "action_progress": round(self.action_progress, 1),
             "action_detail": self.action_detail,
@@ -143,14 +202,41 @@ class ScrapingState:
         }
         return colors.get(self.current_action, "#8b949e")
 
-    def add_reinit_log(self, message: str) -> None:
-        entry = {
-            "timestamp": datetime.datetime.now().strftime("%H:%M:%S"),
-            "message": message,
-        }
-        self.reinit_logs.append(entry)
-        if len(self.reinit_logs) > self.max_log_entries:
-            self.reinit_logs.pop(0)
+
+class ScraperManager:
+    """Handles scraper task lifecycle: start, stop and restart with new settings."""
+
+    def __init__(self, state: ScrapingState):
+        self.state = state
+        self._task: Optional[asyncio.Task] = None
+        self._lock = asyncio.Lock()
+
+    async def start(self) -> bool:
+        async with self._lock:
+            if self._task and not self._task.done():
+                return False
+            self._task = asyncio.create_task(_run_scraper_wrapper(self.state))
+            return True
+
+    async def stop(self) -> None:
+        async with self._lock:
+            task = self._task
+            if task and not task.done():
+                self.state.is_running = False
+                try:
+                    await asyncio.wait_for(task, timeout=30)
+                except asyncio.TimeoutError:
+                    logger.warning("Scraper did not stop gracefully, cancelling")
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+            self._task = None
+
+    async def restart(self) -> bool:
+        await self.stop()
+        return await self.start()
 
 
 def _init_worksheet(ws: Worksheet) -> None:
@@ -236,6 +322,7 @@ def _auto_size_columns(ws: Worksheet) -> None:
                 max_len = max(max_len, len(str(cell.value)))
         ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
 
+
 async def _broadcast_state(state: ScrapingState) -> None:
     if not state.ws_clients:
         return
@@ -251,10 +338,37 @@ async def _broadcast_state(state: ScrapingState) -> None:
     for ws in dead_clients:
         state.ws_clients.discard(ws)
 
+
+async def _run_scraper_wrapper(state: ScrapingState) -> None:
+    """Wrap scraper to log crashes and broadcast the error state."""
+    try:
+        await _run_scraper(state)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.exception("Scraper crashed: %s", exc)
+        state.last_error = f"Scraper crashed: {exc}"
+        state.is_running = False
+        state.set_action("idle")
+        await _broadcast_state(state)
+
+
 async def _run_scraper(state: ScrapingState) -> None:
     state.is_running = True
     state.start_time = time.time()
     state.current_id = state.id_min
+    state.users_scraped = 0
+    state.batch_count = 0
+    state.avg_batch_duration = 0.0
+    state.last_error = None
+    state.last_iteration_duration = None
+    state.last_batch_user_count = 0
+    state.last_broadcasted_batch_idx = 0
+    state.first_user_id = None
+    state.last_user_id = None
+    state.reinit_logs.clear()
+    state.batch_logs.clear()
+    state.update_excel_path()
 
     cl = Tuiclient()
     await cl._init_log()
@@ -291,6 +405,7 @@ async def _run_scraper(state: ScrapingState) -> None:
 
             logger.info("Fetching %s", detail)
 
+            iteration_start = time.time()
             state.set_action("cooldown", duration_estimate=state.cooldown_seconds, detail=detail)
             cooldown_start = time.time()
             while time.time() - cooldown_start < state.cooldown_seconds:
@@ -319,7 +434,7 @@ async def _run_scraper(state: ScrapingState) -> None:
                 logger.info("Reinitializing client...")
                 state.add_reinit_log("Client reinitialized")
 
-                reinit_duration = state.cooldown_seconds * 2
+                reinit_duration = state.reconnect_cooldown_seconds
                 state.set_action("reinit", duration_estimate=reinit_duration, detail="Подключение к API")
                 reinit_start = time.time()
                 while time.time() - reinit_start < reinit_duration:
@@ -343,6 +458,8 @@ async def _run_scraper(state: ScrapingState) -> None:
             users_by_id = {user.id: user for user in new_infos}
 
             parse_count = len([uid for uid in id_range if uid in users_by_id])
+            state.last_batch_user_count = parse_count
+            state.add_batch_log(state.current_id, c_id_max - 1, parse_count, batch_duration)
             state.set_action("parsing", duration_estimate=0.5 + parse_count * 0.01, detail=f"{parse_count} пользователей")
             await _broadcast_state(state)
 
@@ -361,13 +478,21 @@ async def _run_scraper(state: ScrapingState) -> None:
 
                 _append_user_row(ws, current_row, user)
                 current_row += 1
+                if state.first_user_id is None:
+                    state.first_user_id = user.id
+                state.last_user_id = user.id
 
                 state.update_action_progress()
                 if state.users_scraped % 10 == 0:
                     await _broadcast_state(state)
 
+            iteration_duration = time.time() - iteration_start
+            state.last_iteration_duration = round(iteration_duration, 2)
+            state.last_broadcasted_batch_idx = len(state.batch_logs)
+
             state.current_id = c_id_max
             state.last_error = None
+            state.update_excel_path()
 
             if state.batch_count % 10 == 0:
                 state.set_action("saving", duration_estimate=1.0, detail="Автосохранение")
@@ -382,6 +507,7 @@ async def _run_scraper(state: ScrapingState) -> None:
         state.set_action("saving", duration_estimate=1.0, detail="Финальное сохранение")
         await _broadcast_state(state)
         _auto_size_columns(ws)
+        state.update_excel_path()
         wb.save(state.excel_path)
         logger.info("Final save: %s", state.excel_path)
         console.print(rich_table)
@@ -567,13 +693,25 @@ _DASHBOARD_HTML = """
             </div>
         </div>
 
-        <div class="bg-card border border-border rounded-xl p-5 md:p-6 mb-5 card-hover">
-            <div class="flex items-center gap-2 mb-4">
-                <i data-lucide="trending-up" class="w-5 h-5 text-accent"></i>
-                <span class="text-sm font-medium uppercase tracking-wider text-muted">Длительность итераций (сек)</span>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+            <div class="bg-card border border-border rounded-xl p-5 md:p-6 card-hover">
+                <div class="flex items-center gap-2 mb-4">
+                    <i data-lucide="trending-up" class="w-5 h-5 text-accent"></i>
+                    <span class="text-sm font-medium uppercase tracking-wider text-muted">Длительность итераций (сек)</span>
+                </div>
+                <div class="relative h-64 w-full">
+                    <canvas id="iteration-chart"></canvas>
+                </div>
             </div>
-            <div class="relative h-64 w-full">
-                <canvas id="iteration-chart"></canvas>
+
+            <div class="bg-card border border-border rounded-xl p-5 md:p-6 card-hover">
+                <div class="flex items-center gap-2 mb-4">
+                    <i data-lucide="users" class="w-5 h-5 text-success"></i>
+                    <span class="text-sm font-medium uppercase tracking-wider text-muted">Пользователей за батч</span>
+                </div>
+                <div class="relative h-64 w-full">
+                    <canvas id="users-chart"></canvas>
+                </div>
             </div>
         </div>
 
@@ -582,11 +720,48 @@ _DASHBOARD_HTML = """
                 <i data-lucide="sliders-horizontal" class="w-5 h-5 text-muted"></i>
                 <span class="text-sm font-medium uppercase tracking-wider text-muted">Управление</span>
             </div>
-            <div class="flex flex-wrap items-center gap-3">
-                <label class="text-sm text-muted">Кулдаун (сек):</label>
-                <input type="number" id="cooldown-input" value="10" min="0" step="0.5"
-                       class="w-24 bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors">
+
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+                <div>
+                    <label class="block text-xs text-muted mb-1">ID от</label>
+                    <input type="number" id="id-min" value="9950000" min="0" step="1"
+                           class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
+                </div>
+                <div>
+                    <label class="block text-xs text-muted mb-1">ID до</label>
+                    <input type="number" id="id-max" value="15000000" min="0" step="1"
+                           class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
+                </div>
+                <div>
+                    <label class="block text-xs text-muted mb-1">Шаг батча</label>
+                    <input type="number" id="id-step" value="1000" min="1" step="1"
+                           class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
+                </div>
+                <div class="flex items-end">
+                    <button onclick="restartScraper()" id="restart-btn" class="btn-press w-full flex items-center justify-center gap-2 bg-accent hover:bg-accent/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                        <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                        <span id="restart-btn-text">Задать диапазон и перезапустить</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3 border-t border-border pt-4">
+                <div class="flex items-center gap-2">
+                    <label class="text-sm text-muted">Кулдаун (сек):</label>
+                    <input type="number" id="cooldown-input" value="10" min="0" step="0.5"
+                           class="w-24 bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors">
+                </div>
                 <button onclick="updateCooldown()" class="btn-press flex items-center gap-2 bg-accent hover:bg-accent/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                    <i data-lucide="check" class="w-4 h-4"></i>
+                    Применить
+                </button>
+
+                <div class="flex items-center gap-2">
+                    <label class="text-sm text-muted">Кулдаун переподключения (сек):</label>
+                    <input type="number" id="reconnect-cooldown-input" value="20" min="0" step="0.5"
+                           class="w-24 bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors">
+                </div>
+                <button onclick="updateReconnectCooldown()" class="btn-press flex items-center gap-2 bg-accent hover:bg-accent/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
                     <i data-lucide="check" class="w-4 h-4"></i>
                     Применить
                 </button>
@@ -598,10 +773,24 @@ _DASHBOARD_HTML = """
                     <i data-lucide="save" class="w-4 h-4"></i>
                     <span id="save-btn-text">Сохранить сейчас</span>
                 </button>
+                <a href="/api/download" download class="btn-press flex items-center gap-2 bg-purple hover:bg-purple/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors no-underline">
+                    <i data-lucide="download" class="w-4 h-4"></i>
+                    Скачать таблицу
+                </a>
                 <button onclick="stopScraper()" class="btn-press flex items-center gap-2 bg-danger hover:bg-danger/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
                     <i data-lucide="square" class="w-4 h-4"></i>
                     Стоп
                 </button>
+            </div>
+        </div>
+
+        <div class="bg-card border border-border rounded-xl p-5 md:p-6 mb-5 card-hover">
+            <div class="flex items-center gap-2 mb-4">
+                <i data-lucide="list-checks" class="w-5 h-5 text-success"></i>
+                <span class="text-sm font-medium uppercase tracking-wider text-muted">Лог батчей</span>
+            </div>
+            <div id="batch-log-container" class="max-h-72 overflow-y-auto font-mono text-xs space-y-1">
+                <div class="text-muted italic py-2">Пока нет успешных батчей</div>
             </div>
         </div>
 
@@ -676,9 +865,59 @@ _DASHBOARD_HTML = """
             }
         });
 
+        const usersCtx = document.getElementById('users-chart').getContext('2d');
+        const usersChart = new Chart(usersCtx, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Пользователей',
+                    data: [],
+                    backgroundColor: 'rgba(63, 185, 80, 0.6)',
+                    borderColor: '#3fb950',
+                    borderWidth: 1,
+                    borderRadius: 3
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: '#161b22',
+                        borderColor: '#30363d',
+                        borderWidth: 1,
+                        titleColor: '#8b949e',
+                        bodyColor: '#c9d1d9',
+                        padding: 10,
+                        cornerRadius: 8,
+                        displayColors: false,
+                        callbacks: {
+                            title: (items) => 'Итерация ' + items[0].label,
+                            label: (item) => item.raw + ' пользователей'
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { color: '#30363d', drawBorder: false },
+                        ticks: { color: '#8b949e', font: { size: 11 } }
+                    },
+                    y: {
+                        grid: { color: '#30363d', drawBorder: false },
+                        ticks: { color: '#8b949e', font: { size: 11 } },
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+
         const ws = new WebSocket(`ws://${location.host}/ws`);
         let isPaused = false;
+        let lastProcessedBatchIdx = 0;
         let iterationDurations = [];
+        let batchUserCounts = [];
         const MAX_CHART_POINTS = 50;
 
         function fmtTime(sec) {
@@ -702,6 +941,13 @@ _DASHBOARD_HTML = """
             iterationChart.data.labels = iterationDurations.map((_, i) => i + 1);
             iterationChart.data.datasets[0].data = iterationDurations;
             iterationChart.update('none');
+        }
+
+        function updateUsersChart(counts) {
+            batchUserCounts = counts.slice(-MAX_CHART_POINTS);
+            usersChart.data.labels = batchUserCounts.map((_, i) => i + 1);
+            usersChart.data.datasets[0].data = batchUserCounts;
+            usersChart.update('none');
         }
 
         const actionColors = {
@@ -753,6 +999,18 @@ _DASHBOARD_HTML = """
 
                 const lastErrorEl = document.getElementById('last-error');
                 if (lastErrorEl) lastErrorEl.textContent = d.last_error || '';
+
+                const idMinEl = document.getElementById('id-min');
+                const idMaxEl2 = document.getElementById('id-max');
+                const idStepEl = document.getElementById('id-step');
+                if (idMinEl && !idMinEl.matches(':focus')) idMinEl.value = d.id_min || 0;
+                if (idMaxEl2 && !idMaxEl2.matches(':focus')) idMaxEl2.value = d.id_max || 0;
+                if (idStepEl && !idStepEl.matches(':focus')) idStepEl.value = d.id_step || 1000;
+
+                const cooldownInput = document.getElementById('cooldown-input');
+                const reconnectInput = document.getElementById('reconnect-cooldown-input');
+                if (cooldownInput && !cooldownInput.matches(':focus')) cooldownInput.value = d.cooldown_seconds || 10;
+                if (reconnectInput && !reconnectInput.matches(':focus')) reconnectInput.value = d.reconnect_cooldown_seconds || 20;
 
                 const pauseBtn = document.getElementById('pause-btn');
                 const pauseSpan = pauseBtn?.querySelector('span');
@@ -810,8 +1068,25 @@ _DASHBOARD_HTML = """
                     if (actionCard) actionCard.classList.add('hidden');
                 }
 
-                if (d.iteration_duration !== undefined && d.iteration_duration !== null) {
-                    updateChart(d.iteration_duration);
+                if (d.last_broadcasted_batch_idx !== lastProcessedBatchIdx) {
+                    lastProcessedBatchIdx = d.last_broadcasted_batch_idx;
+                    if (d.iteration_duration !== undefined && d.iteration_duration !== null) {
+                        updateChart(d.iteration_duration);
+                    }
+                    if (d.batch_counts && d.batch_counts.length > 0) {
+                        updateUsersChart(d.batch_counts);
+                    }
+                }
+
+                const batchLogContainer = document.getElementById('batch-log-container');
+                if (batchLogContainer && d.batch_logs && d.batch_logs.length > 0) {
+                    batchLogContainer.innerHTML = d.batch_logs.map((l) => {
+                        return `<div class="log-entry-anim flex gap-3 py-1.5 border-b border-border/50">
+                            <span class="text-muted whitespace-nowrap shrink-0">${l.timestamp || ''}</span>
+                            <span class="text-success">${l.message || ''}</span>
+                        </div>`;
+                    }).join('');
+                    batchLogContainer.scrollTop = batchLogContainer.scrollHeight;
                 }
 
                 const logContainer = document.getElementById('log-container');
@@ -862,6 +1137,16 @@ _DASHBOARD_HTML = """
             });
         }
 
+        async function updateReconnectCooldown() {
+            const val = parseFloat(document.getElementById('reconnect-cooldown-input').value);
+            if (isNaN(val) || val < 0) return;
+            await fetch('/api/reconnect-cooldown', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({seconds: val})
+            });
+        }
+
         async function togglePause() {
             await fetch('/api/pause', {method: 'POST'});
         }
@@ -880,6 +1165,37 @@ _DASHBOARD_HTML = """
             }
             setTimeout(() => {
                 if (btnText) btnText.textContent = 'Сохранить сейчас';
+                if (btn) btn.disabled = false;
+            }, 2000);
+        }
+
+        async function restartScraper() {
+            const id_min = parseInt(document.getElementById('id-min').value);
+            const id_max = parseInt(document.getElementById('id-max').value);
+            const id_step = parseInt(document.getElementById('id-step').value);
+            if (isNaN(id_min) || isNaN(id_max) || isNaN(id_step) || id_min >= id_max || id_step <= 0) {
+                alert('Некорректный диапазон: ID от должно быть меньше ID до, шаг батча больше 0.');
+                return;
+            }
+            if (!confirm('Перезапустить скрапер с новым диапазоном? Текущий файл таблицы будет перезаписан.')) return;
+
+            const btnText = document.getElementById('restart-btn-text');
+            const btn = document.getElementById('restart-btn');
+            if (btn) btn.disabled = true;
+            if (btnText) btnText.textContent = 'Перезапуск...';
+            try {
+                const res = await fetch('/api/restart', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({id_min, id_max, id_step})
+                });
+                const data = await res.json();
+                if (btnText) btnText.textContent = data.ok ? 'Перезапущен!' : 'Ошибка';
+            } catch {
+                if (btnText) btnText.textContent = 'Ошибка';
+            }
+            setTimeout(() => {
+                if (btnText) btnText.textContent = 'Задать диапазон и перезапустить';
                 if (btn) btn.disabled = false;
             }, 2000);
         }
@@ -933,6 +1249,19 @@ async def _handle_cooldown(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": str(exc)}, status=400)
 
 
+async def _handle_reconnect_cooldown(request: web.Request) -> web.Response:
+    state: ScrapingState = request.app["state"]
+    try:
+        data = await request.json()
+        seconds = float(data.get("seconds", 20))
+        state.reconnect_cooldown_seconds = max(0, seconds)
+        logger.info("Reconnect cooldown updated to %.1f seconds", state.reconnect_cooldown_seconds)
+        await _broadcast_state(state)
+        return web.json_response({"ok": True, "reconnect_cooldown": state.reconnect_cooldown_seconds})
+    except Exception as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+
 async def _handle_pause(request: web.Request) -> web.Response:
     state: ScrapingState = request.app["state"]
     state.is_paused = not state.is_paused
@@ -976,6 +1305,72 @@ async def _handle_stop(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
+async def _handle_range(request: web.Request) -> web.Response:
+    state: ScrapingState = request.app["state"]
+    try:
+        data = await request.json()
+        id_min = int(data.get("id_min", state.id_min))
+        id_max = int(data.get("id_max", state.id_max))
+        id_step = int(data.get("id_step", state.id_step))
+
+        if id_min >= id_max or id_step <= 0:
+            return web.json_response({"ok": False, "error": "Invalid range"}, status=400)
+
+        state.set_range(id_min, id_max, id_step)
+        logger.info("Range updated to %d-%d step %d", id_min, id_max, id_step)
+        await _broadcast_state(state)
+        return web.json_response({
+            "ok": True,
+            "range": {"id_min": id_min, "id_max": id_max, "id_step": id_step},
+        })
+    except Exception as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+
+async def _handle_restart(request: web.Request) -> web.Response:
+    state: ScrapingState = request.app["state"]
+    manager: ScraperManager = request.app["manager"]
+    try:
+        data = await request.json()
+        id_min = int(data.get("id_min", state.id_min))
+        id_max = int(data.get("id_max", state.id_max))
+        id_step = int(data.get("id_step", state.id_step))
+
+        if id_min >= id_max or id_step <= 0:
+            return web.json_response({"ok": False, "error": "Invalid range"}, status=400)
+
+        state.set_range(id_min, id_max, id_step)
+        logger.info("Restarting scraper with range %d-%d step %d", id_min, id_max, id_step)
+        await _broadcast_state(state)
+
+        started = await manager.restart()
+        return web.json_response({"ok": started})
+    except Exception as exc:
+        logger.error("Restart failed: %s", exc)
+        return web.json_response({"ok": False, "error": str(exc)}, status=500)
+
+
+async def _handle_download(request: web.Request) -> web.Response:
+    state: ScrapingState = request.app["state"]
+    path = Path(state.excel_path)
+    if not path.exists():
+        return web.json_response({"ok": False, "error": "File not found"}, status=404)
+
+    try:
+        data = path.read_bytes()
+        return web.Response(
+            body=data,
+            headers={
+                "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "Content-Disposition": f'attachment; filename="{path.name}"',
+                "Content-Length": str(len(data)),
+            },
+        )
+    except Exception as exc:
+        logger.error("Download failed: %s", exc)
+        return web.json_response({"ok": False, "error": str(exc)}, status=500)
+
+
 def create_app(state: ScrapingState) -> web.Application:
     app = web.Application()
     app["state"] = state
@@ -983,9 +1378,13 @@ def create_app(state: ScrapingState) -> web.Application:
     app.router.add_get("/", _handle_index)
     app.router.add_get("/ws", _handle_ws)
     app.router.add_post("/api/cooldown", _handle_cooldown)
+    app.router.add_post("/api/reconnect-cooldown", _handle_reconnect_cooldown)
     app.router.add_post("/api/pause", _handle_pause)
     app.router.add_post("/api/save", _handle_save)
     app.router.add_post("/api/stop", _handle_stop)
+    app.router.add_post("/api/range", _handle_range)
+    app.router.add_post("/api/restart", _handle_restart)
+    app.router.add_get("/api/download", _handle_download)
 
     return app
 
@@ -996,17 +1395,22 @@ async def _periodic_broadcast(state: ScrapingState) -> None:
         if state.is_running:
             await _broadcast_state(state)
 
+
 async def main() -> None:
     state = ScrapingState(
         id_min=9_950_000,
         id_max=15_000_000,
         id_step=1000,
         cooldown_seconds=20.0,
+        reconnect_cooldown_seconds=20.0,
     )
 
     app = create_app(state)
 
-    scraper_task = asyncio.create_task(_run_scraper(state))
+    manager = ScraperManager(state)
+    app["manager"] = manager
+    await manager.start()
+
     broadcast_task = asyncio.create_task(_periodic_broadcast(state))
 
     runner = web.AppRunner(app)
@@ -1017,11 +1421,13 @@ async def main() -> None:
     logger.info("🚀 Dashboard running at http://127.0.0.1:8081")
 
     try:
-        await scraper_task
+        while True:
+            await asyncio.sleep(3600)
     except asyncio.CancelledError:
         pass
     finally:
         broadcast_task.cancel()
+        await manager.stop()
         await runner.cleanup()
 
 
