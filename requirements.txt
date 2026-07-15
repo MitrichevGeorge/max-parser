@@ -1,5 +1,7 @@
 websockets
 pydantic-settings
+lz4
+msgpack
 loguru
 prompt_toolkit
 questionary

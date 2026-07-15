@@ -485,14 +485,6 @@ _DASHBOARD_HTML = """
             box-shadow: 0 8px 32px rgba(0,0,0,0.3);
         }
 
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-4px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .log-entry-anim {
-            animation: fadeIn 0.2s ease-out;
-        }
-
         .btn-press:active {
             transform: scale(0.96);
         }
@@ -1006,10 +998,10 @@ async def _periodic_broadcast(state: ScrapingState) -> None:
 
 async def main() -> None:
     state = ScrapingState(
-        id_min=9_990_000,
-        id_max=10_000_000,
+        id_min=9_950_000,
+        id_max=15_000_000,
         id_step=1000,
-        cooldown_seconds=10.0,
+        cooldown_seconds=20.0,
     )
 
     app = create_app(state)
@@ -1019,10 +1011,10 @@ async def main() -> None:
 
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "127.0.0.1", 8080)
+    site = web.TCPSite(runner, "127.0.0.1", 8081)
     await site.start()
 
-    logger.info("🚀 Dashboard running at http://127.0.0.1:8080")
+    logger.info("🚀 Dashboard running at http://127.0.0.1:8081")
 
     try:
         await scraper_task
