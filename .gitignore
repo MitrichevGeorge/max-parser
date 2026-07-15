@@ -3,7 +3,6 @@ env/
 *.pyc
 src/w*.json
 logs/
-src/users_table.py
 9990002-9999999.xlsx
 __pycache__
 src/__pycache__

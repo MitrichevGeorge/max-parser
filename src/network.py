@@ -150,6 +150,7 @@ class NetworkMixin:
         await self._send(49, {'chatId': chatID, 'from': int(d_from.timestamp() * 1000), 'forward': 0, 'backward': backward, 'getMessages': True})
         response = await self.wait_for_opcode(49)
         adapter = TypeAdapter(List[Message])
+        open("src/w3.json", "w").write(json.dumps(response, cls=UniversalEncoder, indent=2))
         return adapter.validate_python(response["payload"]["messages"])
 
     async def get_file_url(self, fileId: int, chatId: int, messageId: int) -> str:
@@ -165,5 +166,4 @@ class NetworkMixin:
         # {'magic': 10, 'cmd': 0, 'seq': 30, 'opcode': 64, 'payload': {'chatId': 467209839, 'message': {'text': 'text', 'cid': -1784067252800, 'elements': [], 'attaches': []}, 'notify': True}}
         # {'magic': 10, 'cmd': 1, 'seq': 30, 'opcode': 64, 'payload': {'chatId': 467209839, 'message': {'id': 116920631487452673, 'time': 1784067252921, 'type': 'USER', 'sender': 137594677, 'cid': -1784067252800, 'text': 'text', 'attaches': []}, 'unread': 0, 'mark': 1784067252921}}
 
-        # open("src/w3.json", "w").write(json.dumps(response, cls=UniversalEncoder, indent=2))
 
