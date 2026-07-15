@@ -23,9 +23,11 @@ class UserProfile(BaseModel):
     country: Optional[str] = ''
     names: List[NameInfo]
     options: List[str]
+    description: Optional[str] = None
     phone: Optional[int] = None
     photoId: Optional[int] = None
     status: Optional[str] = None
+    baseUrl: Optional[str] = None
 
     @field_validator('registrationTime', 'updateTime', mode='before')
     @classmethod
@@ -40,8 +42,10 @@ class UserProfile(BaseModel):
         print(f'{indent}┌{"─"*4} [{self.country}] {self.names[0].name}')
         print(f'{child_indent}Phone: +{self.phone}')
         print(f'{child_indent}ID: {self.id}')
+        print(f'{child_indent}Name: {self.get_name()}')
         print(f'{child_indent}Registration: {self.registrationTime}')
         print(f'{child_indent}Update: {self.updateTime}')
+        print(f'{child_indent}Account status: {self.accountStatus}')
         print(f'{indent}└{"─"*6}')
 
     def get_name(self) -> str:
@@ -155,9 +159,50 @@ class UserAccountConfig(BaseModel):
     SAFE_MODE: bool
     AUDIO_TRANSCRIPTION_ENABLED: bool
 
+class ServerConfig(BaseModel):
+    calls_endpoint: str = Field(alias="calls-endpoint")
+    invite_link: str = Field(alias="invite-link")
+
+    max_audio_length: int = Field(alias="max-audio-length")
+    max_description_length: int = Field(alias="max-description-length")
+    max_favorite_chats: int = Field(alias="max-favorite-chats")
+    max_favorite_sticker_sets: int = Field(alias="max-favorite-sticker-sets")
+    max_favorite_stickers: int = Field(alias="max-favorite-stickers")
+    max_msg_length: int = Field(alias="max-msg-length")
+    max_participants: int = Field(alias="max-participants")
+    max_readmarks: int = Field(alias="max-readmarks")
+    max_theme_length: int = Field(alias="max-theme-length")
+    max_video_duration_download: int = Field(alias="max-video-duration-download")
+    nick_max_length: int = Field(alias="nick-max-length")
+    nick_min_length: int = Field(alias="nick-min-length")
+
+    white_list_links: List[str] = Field(alias="white-list-links")
+
+    def info(self, tab = 0):
+        indent = "│" * tab
+        child_indent = "│" * (tab + 1)
+        print(f'{indent}┌{"─"*4} Server config ')
+        print(f'{child_indent}White List Links: {self.white_list_links}')
+        print(f'{child_indent}Calls endpoint: {self.calls_endpoint}')
+        print(f'{child_indent}Invite link: {self.invite_link}')
+        print(f'{child_indent}Max Audio Length: {self.max_audio_length}')
+        print(f'{child_indent}Max Description Length: {self.max_description_length}')
+        print(f'{child_indent}Max Favorite Chats: {self.max_favorite_chats}')
+        print(f'{child_indent}Max Favorite Sticker Sets: {self.max_favorite_sticker_sets}')
+        print(f'{child_indent}Max Favorite Stickers: {self.max_favorite_stickers}')
+        print(f'{child_indent}Max Msg Length: {self.max_msg_length}')
+        print(f'{child_indent}Max Participants: {self.max_participants}')
+        print(f'{child_indent}Max Readmarks: {self.max_readmarks}')
+        print(f'{child_indent}Max Theme Length: {self.max_theme_length}')
+        print(f'{child_indent}Max Video Duration Download: {self.max_video_duration_download}')
+        print(f'{child_indent}Nick Length: {self.nick_min_length} - {self.nick_max_length}')
+        print(f'{indent}└{"─"*6}')
+
+
 class ConfigContainer(BaseModel):
     chats: Dict[int, ChatConfig]
     user: UserAccountConfig
+    server: ServerConfig
 
 class ServerData(BaseModel):
     profile: ProfileContainer

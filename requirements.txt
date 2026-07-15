@@ -2,3 +2,11 @@ websockets
 pydantic-settings
 loguru
 prompt_toolkit
+questionary
+
+rich
+openpyxl
+pandas
+
+aiohttp
+uvicorn

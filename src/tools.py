@@ -1,4 +1,4 @@
-from typing import Iterable, Any, Final
+from typing import Iterable, Any, Final, List
 import math
 import json
 import base64
@@ -43,8 +43,9 @@ OnOffBool = Annotated[
 ]
 
 
-from prompt_toolkit.shortcuts import PromptSession
-from prompt_toolkit.validation import Validator, ValidationError
+from questionary import Validator, ValidationError, Choice
+from prompt_toolkit.patch_stdout import patch_stdout
+import questionary
 
 class NumberValidator(Validator):
     def __init__(self, min_n: int | None = None, max_n: int | None = None):
@@ -66,19 +67,26 @@ class NumberValidator(Validator):
         if self.max_n is not None and value > self.max_n:
             raise ValidationError(message=f"Number must be <= {self.max_n}.")
 
-_session = PromptSession()
-
 async def ask(prompt_text: str = "> ", validator: Validator | None = None) -> str:
     try:
-        return await _session.prompt_async(prompt_text, validator=validator)
+        return await questionary.text(prompt_text, validate=validator).ask_async()
     except (EOFError, KeyboardInterrupt):
         print("\nCancelled by user.")
         exit(0)
 
-async def read_number( prompt: str = "", min_n: int | None = None, max_n: int | None = None) -> int:
+async def read_number(prompt_text: str = "", min_n: int | None = None, max_n: int | None = None) -> int:
     validator = NumberValidator(min_n, max_n)
-    user_input = await ask(f"{prompt} -> ", validator=validator)
+    user_input = await ask(f"{prompt_text} -> ", validator=validator)
+    if not user_input:
+        print("\nCancelled by user.")
+        exit(0)
     return int(user_input.strip())
+
+async def sel(menu_items: List[str], prompt_text: str = "") -> int:
+    return await questionary.select(
+        prompt_text,
+        choices=[Choice(title=item, value=idx) for idx, item in enumerate(menu_items)]
+    ).ask_async()
 
 
 BINARY_UNITS: Final[tuple[str, ...]] = ('B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB')

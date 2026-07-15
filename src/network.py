@@ -66,7 +66,8 @@ class NetworkMixin:
                 
                 msg = self.codec.bytes_to_payload(raw)
                 logger.info(f"↓ {msg}")
-                if msg.get("cmd") == 1:
+                cmd = msg.get("cmd")
+                if isinstance(cmd, int) and cmd > 0:
                     opcode = msg.get("opcode")
                     if opcode in self._listeners:
                         for queue in list(self._listeners[opcode]):
@@ -140,8 +141,10 @@ class NetworkMixin:
     async def get_infos(self, contactIds: List[int]) -> List[UserProfile]:
         await self._send(32, {'contactIds': contactIds})
         response = await self.wait_for_opcode(32)
-        adapter = TypeAdapter(List[UserProfile])
-        return adapter.validate_python(response["payload"]["contacts"])
+        if response['cmd'] == 1:
+            adapter = TypeAdapter(List[UserProfile])
+            return adapter.validate_python(response["payload"]["contacts"])
+        raise RuntimeError
 
     async def get_messages(self, chatID: int, d_from: datetime = datetime.now(), backward: int = 60) -> List[Message]:
         await self._send(49, {'chatId': chatID, 'from': int(d_from.timestamp() * 1000), 'forward': 0, 'backward': backward, 'getMessages': True})
@@ -153,7 +156,14 @@ class NetworkMixin:
         await self._send(88, {'fileId': fileId, 'chatId': chatId, 'messageId': messageId})
         response = await self.wait_for_opcode(88)
         return response["payload"]["url"]
-        
+
+    async def send_message(self, chatId: int, text: str, cid: int, notify: bool = True) -> Message:
+        await self._send(64, {'chatId': chatId, 'message': {'text': text, 'cid': cid, 'elements': [], 'attaches': []}, 'notify': notify})
+        response = await self.wait_for_opcode(64)
+        return Message.model_validate(response["payload"]["message"])
+
+        # {'magic': 10, 'cmd': 0, 'seq': 30, 'opcode': 64, 'payload': {'chatId': 467209839, 'message': {'text': 'text', 'cid': -1784067252800, 'elements': [], 'attaches': []}, 'notify': True}}
+        # {'magic': 10, 'cmd': 1, 'seq': 30, 'opcode': 64, 'payload': {'chatId': 467209839, 'message': {'id': 116920631487452673, 'time': 1784067252921, 'type': 'USER', 'sender': 137594677, 'cid': -1784067252800, 'text': 'text', 'attaches': []}, 'unread': 0, 'mark': 1784067252921}}
 
         # open("src/w3.json", "w").write(json.dumps(response, cls=UniversalEncoder, indent=2))
 

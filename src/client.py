@@ -1,4 +1,6 @@
 import asyncio
+
+from rich import table
 from classes import AttachType, ConfigContainer, Message, UserProfile, Chat, ServerData
 import payloads as pl
 from typing import Any, Dict, List
@@ -6,7 +8,7 @@ from operator import itemgetter
 from loguru import logger
 import sys
 from network import NetworkMixin
-from tools import any_without, read_number, ask
+from tools import any_without, read_number, ask, sel
 from settings import stg
 import socket
 from prompt_toolkit.patch_stdout import patch_stdout
@@ -133,11 +135,7 @@ class Tuiclient(Client):
             logger.add(sys.stdout, colorize=True, format="<green>{time:HH:mm:ss}</green> | {level} | {message}")
 
 
-
-    async def begin(self):
-        await self._init_log()
-        await self.connect()
-        self.profile.info()
+    async def chats_list(self):
         print("Chats:")
         norm_chatlist = await self.norm_chatlist(new_type=True)
         for i in norm_chatlist:
@@ -150,6 +148,7 @@ class Tuiclient(Client):
         norm_chat = await self.norm_chat(chat_id)
         for i in norm_chat:
             print(f'{i[0]}) {i[1]}')
+        
         msg_id = norm_chat[await read_number(min_n=0, max_n=(len(norm_chat) - 1))][2]
         msg_by_id = self.chats_by_id[chat_id].messages_by_id
         if msg_by_id:
@@ -158,6 +157,35 @@ class Tuiclient(Client):
                 if message.attaches[0].type == AttachType.FILE:
                     print(await self.get_file_url(message.attaches[0].fileId, chat_id, message.id))
             await self.message_info(message)
+        
+        text: str = await ask()
+        await self.send_message(chat_id, text, -1784067252808)
+
+    async def begin(self):
+        await self._init_log()
+        await self.connect()
+
+        while True:
+            match await sel(["Profile info", "contacts", "Chats list", "Limits and config", "Get user by id", "Exit"], "Main menu"):
+                case 0:
+                    self.profile.info()
+                case 1:
+                    print("Contacts:")
+                    [i.info(1) for i in self.contacts]
+                case 2:
+                    await self.chats_list()
+                case 3:
+                    self.config.server.info()
+                case 4:
+                    user_id = await read_number("User id", 10_000_000, 900_000_000)
+                    await self.update_missing_users([user_id])
+                    if not user_id in self.users_by_id:
+                        print(f"ID {user_id} not found")
+                        continue
+                    self.users_by_id[user_id].info()
+                case _:
+                    print("bye")
+                    return
 
 
 async def main():
