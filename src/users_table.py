@@ -70,6 +70,8 @@ class ScrapingState:
     last_iteration_duration: Optional[float] = None
     last_batch_user_count: int = 0
 
+    _save_path: Optional[str] = field(default=None, repr=False)
+
     ws_clients: Set[web.WebSocketResponse] = field(default_factory=set)
 
     def __post_init__(self):
@@ -87,6 +89,17 @@ class ScrapingState:
             first = self.id_min
             last = self.id_max
         self.excel_path = f"users_table_{first}_{last}.xlsx"
+
+    @property
+    def save_path(self) -> str:
+        """Return the fixed path used for saving the workbook during the run."""
+        if self._save_path is None:
+            self._save_path = self.excel_path
+        return self._save_path
+
+    def reset_save_path(self) -> None:
+        """Reset save path so the next run picks up the new excel_path."""
+        self._save_path = None
 
     def set_range(self, id_min: int, id_max: int, id_step: int) -> None:
         """Update scanning range, recalculate progress and target file name."""
@@ -368,6 +381,7 @@ async def _run_scraper(state: ScrapingState) -> None:
     state.last_user_id = None
     state.reinit_logs.clear()
     state.batch_logs.clear()
+    state.reset_save_path()
     state.update_excel_path()
 
     cl = Tuiclient()
@@ -492,14 +506,13 @@ async def _run_scraper(state: ScrapingState) -> None:
 
             state.current_id = c_id_max
             state.last_error = None
-            state.update_excel_path()
 
             if state.batch_count % 10 == 0:
                 state.set_action("saving", duration_estimate=1.0, detail="Автосохранение")
                 await _broadcast_state(state)
                 _auto_size_columns(ws)
-                wb.save(state.excel_path)
-                logger.info("Auto-saved checkpoint: %s", state.excel_path)
+                wb.save(state.save_path)
+                logger.info("Auto-saved checkpoint: %s", state.save_path)
                 await _broadcast_state(state)
 
             await _broadcast_state(state)
@@ -508,8 +521,9 @@ async def _run_scraper(state: ScrapingState) -> None:
         await _broadcast_state(state)
         _auto_size_columns(ws)
         state.update_excel_path()
-        wb.save(state.excel_path)
-        logger.info("Final save: %s", state.excel_path)
+        state.reset_save_path()
+        wb.save(state.save_path)
+        logger.info("Final save: %s", state.save_path)
         console.print(rich_table)
 
     finally:
@@ -1279,18 +1293,23 @@ async def _handle_save(request: web.Request) -> web.Response:
     await _broadcast_state(state)
 
     try:
-        path = Path(state.excel_path)
-        if path.exists():
-            wb = openpyxl.load_workbook(path)
-            ws = wb.active
-            if ws:
-                _auto_size_columns(ws)
-                wb.save(path)
-                logger.info("Manual save triggered: %s", path)
-                return web.json_response({"ok": True, "path": str(path)})
-        return web.json_response({"ok": False, "error": "Workbook not found"}, status=404)
+        path = Path(state.save_path)
+        logger.info("Manual save requested: path=%s exists=%s users_scraped=%s", path, path.exists(), state.users_scraped)
+        if not path.exists():
+            logger.error("Manual save failed: workbook not found at %s", path)
+            return web.json_response({"ok": False, "error": f"Workbook not found: {path.name}"}, status=404)
+
+        wb = openpyxl.load_workbook(path)
+        ws = wb.active
+        if ws is None:
+            return web.json_response({"ok": False, "error": "No active worksheet"}, status=500)
+
+        _auto_size_columns(ws)
+        wb.save(path)
+        logger.info("Manual save successful: %s", path)
+        return web.json_response({"ok": True, "path": str(path)})
     except Exception as exc:
-        logger.error("Save failed: %s", exc)
+        logger.exception("Manual save failed: %s", exc)
         return web.json_response({"ok": False, "error": str(exc)}, status=500)
     finally:
         state.is_saving = False

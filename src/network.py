@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import json
+import time
 import traceback
 from collections import defaultdict
 from typing import List
@@ -158,7 +159,8 @@ class NetworkMixin:
         response = await self.wait_for_opcode(88)
         return response["payload"]["url"]
 
-    async def send_message(self, chatId: int, text: str, cid: int, notify: bool = True) -> Message:
+    async def send_message(self, chatId: int, text: str, notify: bool = True) -> Message:
+        cid = -(time.time_ns() // 1_000_000)
         await self._send(64, {'chatId': chatId, 'message': {'text': text, 'cid': cid, 'elements': [], 'attaches': []}, 'notify': notify})
         response = await self.wait_for_opcode(64)
         return Message.model_validate(response["payload"]["message"])

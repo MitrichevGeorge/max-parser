@@ -159,7 +159,7 @@ class Tuiclient(Client):
             await self.message_info(message)
         
         text: str = await ask()
-        await self.send_message(chat_id, text, -1784067252808)
+        await self.send_message(chat_id, text)
 
     async def begin(self):
         await self._init_log()
