@@ -3,6 +3,7 @@ import asyncio
 import base64
 import json
 import time
+import uuid
 import traceback
 from collections import defaultdict
 from typing import List
@@ -11,6 +12,7 @@ from pydantic import TypeAdapter
 import websockets
 from operator import itemgetter
 from datetime import datetime
+from enum import IntEnum
 
 from classes import Chat, ConfigContainer, ServerData, UserProfile, Message
 from convert import PacketCodec
@@ -18,6 +20,20 @@ import payloads as pl
 from settings import stg
 from tools import UniversalEncoder
 
+class Opcodes(IntEnum):
+    HARTBEAT = 1
+    HANDSHAKE = 6
+    SEND_VERIFY_CODE = 17
+    CHECK_VERIFY_CODE = 18
+    AUTHENTICATE = 19
+    AUTH_CONFIRM = 20
+
+    SEARCH = 60
+    SEARCH_BY_NUMBER = 46
+    GET_INFOS = 32
+    GET_MESSAGES = 49
+    GET_FILE_URL = 88
+    SEND_MESAGE = 64
 
 def _save_json(file: str, data) -> None:
     with open(file, "w", encoding="utf-8") as f:
@@ -50,13 +66,16 @@ class NetworkMixin:
     async def _netw_connect(self):
         self.connection = await websockets.connect(pl.URL, additional_headers=pl.HEADERS)
         print(f"Successfully connected to {pl.URL}")
-        await self._send(6, pl.get_device_payload(stg.ONEME_DEVICE_ID))
-        await self._send(19, pl.get_auth_payload(stg.ONEME_AUTH["token"]))
+        await self._send(Opcodes.HANDSHAKE, pl.get_device_payload(str(uuid.uuid4())))
+        await self._send(Opcodes.AUTHENTICATE, pl.get_auth_payload(stg.ONEME_AUTH["token"]))
         await self.connection.recv()
         data = (await self._recv())['payload']
         self._reader_task = asyncio.create_task(self._reader_loop())
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
         return data
+
+    async def _auth(self, phone_number: str):
+        await self._send(5, { "phone": phone_number, "type": "START_AUTH", "language": "ru" })
 
     async def _process_message(self, raw):
         async with self._semaphore:
@@ -134,29 +153,37 @@ class NetworkMixin:
             print(f"Connection to {pl.URL} closed")
 
     async def search(self, query: str, count: int = 40) -> list[Chat]:
-        await self._send(60, {'query': query, 'count': count })
-        response = await self.wait_for_opcode(60)
+        await self._send(Opcodes.SEARCH, {'query': query, 'count': count })
+        response = await self.wait_for_opcode(Opcodes.SEARCH)
         adapter = TypeAdapter(list[Chat])
         return adapter.validate_python(map(itemgetter("chat"), response["payload"]["result"]))
 
+    async def search_number(self, query: str) -> UserProfile | None:
+        await self._send(Opcodes.SEARCH_BY_NUMBER, {'phone': query })
+        response = await self.wait_for_opcode(Opcodes.SEARCH_BY_NUMBER)
+        open("src/w3.json", "w").write(json.dumps(response, cls=UniversalEncoder, indent=2))
+        if response["payload"].get("error") == "not.found":
+            return None
+        return UserProfile.validate(response["payload"]["contact"])
+
     async def get_infos(self, contactIds: List[int]) -> List[UserProfile]:
-        await self._send(32, {'contactIds': contactIds})
-        response = await self.wait_for_opcode(32)
+        await self._send(Opcodes.GET_INFOS, {'contactIds': contactIds})
+        response = await self.wait_for_opcode(Opcodes.GET_INFOS)
         if response['cmd'] == 1:
             adapter = TypeAdapter(List[UserProfile])
             return adapter.validate_python(response["payload"]["contacts"])
         raise RuntimeError
 
     async def get_messages(self, chatID: int, d_from: datetime = datetime.now(), backward: int = 60) -> List[Message]:
-        await self._send(49, {'chatId': chatID, 'from': int(d_from.timestamp() * 1000), 'forward': 0, 'backward': backward, 'getMessages': True})
-        response = await self.wait_for_opcode(49)
+        await self._send(Opcodes.GET_MESSAGES, {'chatId': chatID, 'from': int(d_from.timestamp() * 1000), 'forward': 0, 'backward': backward, 'getMessages': True})
+        response = await self.wait_for_opcode(Opcodes.GET_MESSAGES)
         adapter = TypeAdapter(List[Message])
         # open("src/w3.json", "w").write(json.dumps(response, cls=UniversalEncoder, indent=2))
         return adapter.validate_python(response["payload"]["messages"])
 
     async def get_file_url(self, fileId: int, chatId: int, messageId: int) -> str:
-        await self._send(88, {'fileId': fileId, 'chatId': chatId, 'messageId': messageId})
-        response = await self.wait_for_opcode(88)
+        await self._send(Opcodes.GET_FILE_URL, {'fileId': fileId, 'chatId': chatId, 'messageId': messageId})
+        response = await self.wait_for_opcode(Opcodes.GET_FILE_URL)
         return response["payload"]["url"]
 
     async def send_message(self, chatId: int, text: str, notify: bool = True) -> Message:

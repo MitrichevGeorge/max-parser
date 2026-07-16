@@ -46,6 +46,7 @@ OnOffBool = Annotated[
 from questionary import Validator, ValidationError, Choice
 from prompt_toolkit.patch_stdout import patch_stdout
 import questionary
+import re
 
 class NumberValidator(Validator):
     def __init__(self, min_n: int | None = None, max_n: int | None = None):
@@ -66,6 +67,15 @@ class NumberValidator(Validator):
             raise ValidationError(message=f"Number must be >= {self.min_n}.")
         if self.max_n is not None and value > self.max_n:
             raise ValidationError(message=f"Number must be <= {self.max_n}.")
+
+class RussianPhoneValidator(Validator):
+    def validate(self, document):
+        phone_pattern = r"^\+7\d{10}$"
+        if not re.match(phone_pattern, document.text):
+            raise ValidationError(
+                message="Номер должен быть в формате +79991234567",
+                cursor_position=len(document.text)
+            )
 
 async def ask(prompt_text: str = "> ", validator: Validator | None = None) -> str:
     try:

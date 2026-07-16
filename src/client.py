@@ -8,7 +8,7 @@ from operator import itemgetter
 from loguru import logger
 import sys
 from network import NetworkMixin
-from tools import any_without, read_number, ask, sel
+from tools import RussianPhoneValidator, any_without, read_number, ask, sel
 from settings import stg
 import socket
 from prompt_toolkit.patch_stdout import patch_stdout
@@ -138,34 +138,43 @@ class Tuiclient(Client):
     async def chats_list(self):
         print("Chats:")
         norm_chatlist = await self.norm_chatlist(new_type=True)
-        for i in norm_chatlist:
-            print(f'{i[0]}) {i[1]}')
-        
-        chat_id = norm_chatlist[await read_number(min_n=0, max_n=(len(norm_chatlist) - 1))][2]
-        if not isinstance(chat_id, int):
-            raise ValueError
-        self.chats_by_id[chat_id].info()
-        norm_chat = await self.norm_chat(chat_id)
-        for i in norm_chat:
-            print(f'{i[0]}) {i[1]}')
-        
-        msg_id = norm_chat[await read_number(min_n=0, max_n=(len(norm_chat) - 1))][2]
-        msg_by_id = self.chats_by_id[chat_id].messages_by_id
-        if msg_by_id:
-            message = msg_by_id[msg_id]
-            if len(message.attaches) > 0:
-                if message.attaches[0].type == AttachType.FILE:
-                    print(await self.get_file_url(message.attaches[0].fileId, chat_id, message.id))
-            await self.message_info(message)
-        
-        text: str = await ask()
-        await self.send_message(chat_id, text)
+        while True:
+            select = await sel(list(map(itemgetter(1), norm_chatlist))+["Back"], "Chats")
+            if select >= len(norm_chatlist):
+                return
+            
+            chat_id = norm_chatlist[select][2]
+            if not isinstance(chat_id, int):
+                raise ValueError
+            self.chats_by_id[chat_id].info()
+            norm_chat = await self.norm_chat(chat_id)
+            len_norm_chat = len(norm_chat)
+            while True:
+                select = await sel(list(map(itemgetter(1), norm_chat))+["Send message", "Back", "Main menu"], "Messages")
+                match select - len(norm_chat):
+                    case 0:
+                        text: str = await ask()
+                        await self.send_message(chat_id, text)
+                    case 1:
+                        break
+                    case 2:
+                        return
+                    case _:
+                        msg_id = norm_chat[select][2]
+                        msg_by_id = self.chats_by_id[chat_id].messages_by_id
+                        if msg_by_id:
+                            message = msg_by_id[msg_id]
+                            if len(message.attaches) > 0:
+                                if message.attaches[0].type == AttachType.FILE:
+                                    print(await self.get_file_url(message.attaches[0].fileId, chat_id, message.id))
+                            await self.message_info(message)
+            
 
     async def begin(self):
         await self._init_log()
         await self.connect()
         while True:
-            match await sel(["Profile info", "Contacts", "Chats list", "Limits and config", "Get user by id", "Exit"], "Main menu"):
+            match await sel(["Profile info", "Contacts", "Chats list", "Limits and config", "User infos", "Exit"], "Main menu"):
                 case 0:
                     self.profile.info()
                 case 1:
@@ -176,12 +185,29 @@ class Tuiclient(Client):
                 case 3:
                     self.config.server.info()
                 case 4:
-                    user_id = await read_number("User id", 10_000_000, 900_000_000)
-                    await self.update_missing_users([user_id])
-                    if not user_id in self.users_by_id:
-                        print(f"ID {user_id} not found")
-                        continue
-                    self.users_by_id[user_id].info()
+                    match await sel(["Search chats", "Search by number", "Get user by id", "Back"]):
+                        case 0:
+                            query = await ask("query ->")
+                            result = await self.search(query)
+                            if len(result) == 0:
+                                print("Nothing found")
+                            else:
+                                for i in result:
+                                    i.info()
+                        case 1:
+                            query = await ask("phone number ->", validator=RussianPhoneValidator())
+                            result = await self.search_number(query)
+                            if not result:
+                                print("Nothing found")
+                            else:
+                                result.info()
+                        case 2:
+                            user_id = await read_number("User id", 9_900_000, 900_000_000)
+                            await self.update_missing_users([user_id])
+                            if not user_id in self.users_by_id:
+                                print(f"ID {user_id} not found")
+                                continue
+                            self.users_by_id[user_id].info()
                 case _:
                     print("bye")
                     return
