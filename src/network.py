@@ -34,6 +34,7 @@ class Opcodes(IntEnum):
     GET_MESSAGES = 49
     GET_FILE_URL = 88
     SEND_MESAGE = 64
+    DEELETE_CHAT = 52
 
 def _save_json(file: str, data) -> None:
     with open(file, "w", encoding="utf-8") as f:
@@ -75,7 +76,7 @@ class NetworkMixin:
         return data
 
     async def _auth(self, phone_number: str):
-        await self._send(5, { "phone": phone_number, "type": "START_AUTH", "language": "ru" })
+        await self._send(Opcodes.SEND_VERIFY_CODE, { "phone": phone_number, "type": "START_AUTH", "language": "ru" })
 
     async def _process_message(self, raw):
         async with self._semaphore:
@@ -161,10 +162,9 @@ class NetworkMixin:
     async def search_number(self, query: str) -> UserProfile | None:
         await self._send(Opcodes.SEARCH_BY_NUMBER, {'phone': query })
         response = await self.wait_for_opcode(Opcodes.SEARCH_BY_NUMBER)
-        open("src/w3.json", "w").write(json.dumps(response, cls=UniversalEncoder, indent=2))
         if response["payload"].get("error") == "not.found":
             return None
-        return UserProfile.validate(response["payload"]["contact"])
+        return UserProfile.model_validate(response["payload"]["contact"])
 
     async def get_infos(self, contactIds: List[int]) -> List[UserProfile]:
         await self._send(Opcodes.GET_INFOS, {'contactIds': contactIds})
@@ -178,7 +178,6 @@ class NetworkMixin:
         await self._send(Opcodes.GET_MESSAGES, {'chatId': chatID, 'from': int(d_from.timestamp() * 1000), 'forward': 0, 'backward': backward, 'getMessages': True})
         response = await self.wait_for_opcode(Opcodes.GET_MESSAGES)
         adapter = TypeAdapter(List[Message])
-        # open("src/w3.json", "w").write(json.dumps(response, cls=UniversalEncoder, indent=2))
         return adapter.validate_python(response["payload"]["messages"])
 
     async def get_file_url(self, fileId: int, chatId: int, messageId: int) -> str:
@@ -188,11 +187,17 @@ class NetworkMixin:
 
     async def send_message(self, chatId: int, text: str, notify: bool = True) -> Message:
         cid = -(time.time_ns() // 1_000_000)
-        await self._send(64, {'chatId': chatId, 'message': {'text': text, 'cid': cid, 'elements': [], 'attaches': []}, 'notify': notify})
-        response = await self.wait_for_opcode(64)
+        await self._send(Opcodes.SEND_MESAGE, {'chatId': chatId, 'message': {'text': text, 'cid': cid, 'elements': [], 'attaches': []}, 'notify': notify})
+        response = await self.wait_for_opcode(Opcodes.SEND_MESAGE)
         return Message.model_validate(response["payload"]["message"])
 
-        # {'magic': 10, 'cmd': 0, 'seq': 30, 'opcode': 64, 'payload': {'chatId': 467209839, 'message': {'text': 'text', 'cid': -1784067252800, 'elements': [], 'attaches': []}, 'notify': True}}
-        # {'magic': 10, 'cmd': 1, 'seq': 30, 'opcode': 64, 'payload': {'chatId': 467209839, 'message': {'id': 116920631487452673, 'time': 1784067252921, 'type': 'USER', 'sender': 137594677, 'cid': -1784067252800, 'text': 'text', 'attaches': []}, 'unread': 0, 'mark': 1784067252921}}
+    async def delete_chat(self, chatId: int, forAll: bool = True) -> None:
+        last_time = time.time_ns() // 1_000_000
+        await self._send(Opcodes.DEELETE_CHAT, {'chatId': chatId, 'lastEventTime': last_time, 'forAll': forAll})
+        response = await self.wait_for_opcode(Opcodes.DEELETE_CHAT)
+        open("src/w3.json", "w").write(json.dumps(response, cls=UniversalEncoder, indent=2))
 
 
+
+
+# open("src/w3.json", "w").write(json.dumps(response, cls=UniversalEncoder, indent=2))

@@ -1,13 +1,12 @@
-from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any, Literal, Annotated, Union
-from enum import StrEnum, auto
+from typing import List, Dict, Any, Literal, Annotated, Union
+from enum import StrEnum
 from pydantic import BaseModel, Field, field_validator
-from tools import OnOffBool, format_bytes
+from tools import OnOffBool, MSKTimestamp, format_bytes
 
 class NameInfo(BaseModel):
     name: str
     firstName: str
-    lastName: Optional[str] = None
+    lastName: str | None = None
     type: str
 
     def __str__(self) -> str:
@@ -17,24 +16,17 @@ class NameInfo(BaseModel):
 
 class UserProfile(BaseModel):
     id: int
-    registrationTime: datetime
-    updateTime: datetime
+    registrationTime: MSKTimestamp
+    updateTime: MSKTimestamp
     accountStatus: int
-    country: Optional[str] = ''
+    country: str | None = None
     names: List[NameInfo]
     options: List[str]
-    description: Optional[str] = None
-    phone: Optional[int] = None
-    photoId: Optional[int] = None
-    status: Optional[str] = None
-    baseUrl: Optional[str] = None
-
-    @field_validator('registrationTime', 'updateTime', mode='before')
-    @classmethod
-    def parse_milliseconds_to_datetime(cls, value):
-        if isinstance(value, (int, float)):
-            return datetime.fromtimestamp(value / 1000, tz=timezone.utc)
-        return value
+    description: str | None = None
+    phone: int | None = None
+    photoId: int | None = None
+    status: str | None = None
+    baseUrl: str | None = None
 
     def info(self, tab = 0):
         indent = "│" * tab
@@ -46,6 +38,7 @@ class UserProfile(BaseModel):
         print(f'{child_indent}Registration: {self.registrationTime}')
         print(f'{child_indent}Update: {self.updateTime}')
         print(f'{child_indent}Account status: {self.accountStatus}')
+        print(f'{child_indent}Ava: {self.baseUrl}')
         print(f'{indent}└{"─"*6}')
 
     def get_name(self) -> str:
@@ -61,41 +54,33 @@ class VideoConversation(BaseModel):
     callType: str
 
 class Chat(BaseModel):
-    access: Optional[str] = None
-    invitedBy: Optional[int] = None
+    access: str | None = None
+    invitedBy: int | None = None
     owner: int
 
     id: int
-    cid: Optional[int] = None
+    cid: int | None = None
     type: str
     status: str
 
-    title: Optional[str] = None
-    description: Optional[str] = None
+    title: str | None = None
+    description: str | None = None
 
-    modified: datetime
-    joinTime: Optional[datetime] = None
-    created: datetime
-    lastEventTime: datetime
-    messagesCount: Optional[int] = None
-    videoConversation: Optional[VideoConversation] = None
-    hasBots: Optional[bool] = None
-    restrictions: Optional[int] = None
-    prevMessageId: Optional[int] = None
-    participantsCount: Optional[int] = None
-    participants: Optional[Dict] = {}
+    modified: MSKTimestamp
+    joinTime: MSKTimestamp | None = None
+    created: MSKTimestamp
+    lastEventTime: MSKTimestamp
+    messagesCount: int | None = None
+    videoConversation: VideoConversation | None = None
+    hasBots: bool | None = None
+    restrictions: int | None = None
+    prevMessageId: int | None = None
+    participantsCount: int | None = None
+    participants: Dict | None = None
 
-    link: Optional[str] = ''
-    baseIconUrl: Optional[str] = ''
-    baseRawIconUrl: Optional[str] = ''
-    
-
-    @field_validator('modified', 'joinTime', 'created', 'lastEventTime', mode='before')
-    @classmethod
-    def parse_milliseconds_to_datetime(cls, value):
-        if isinstance(value, (int, float)):
-            return datetime.fromtimestamp(value / 1000, tz=timezone.utc)
-        return value
+    link: str | None = None
+    baseIconUrl: str | None = None
+    baseRawIconUrl: str | None = None
 
     def info(self, tab = 0):
         indent = "│" * tab
@@ -109,8 +94,8 @@ class Chat(BaseModel):
         print(f'{child_indent}Link: {self.link}')
         print(f'{indent}└{"─"*6}')
 
-    messages: Optional[List[Message]] = []
-    messages_by_id: Optional[Dict[int,Message]] = {}
+    messages: List[Message] | None = None
+    messages_by_id: Dict[int,Message] | None = None
 
     def update_messages(self):
         if self.messages:
@@ -233,7 +218,7 @@ class ControlAttach(BaseAttach):
     event: str
     userId: int | None = None
     userIds: List[int] | None = None
-    pinnedMessage: Optional["Message"] = None
+    pinnedMessage: Message | None = None
 
 class PhotoAttach(BaseAttach):
     type: Literal[AttachType.PHOTO] = Field(default=AttachType.PHOTO, alias="_type")
@@ -269,8 +254,8 @@ Attach = Annotated[
 
 class Message(BaseModel):
     id: int
-    time: datetime
+    time: MSKTimestamp
     sender: int
     text: str
     attaches: List[Attach]
-    reactionInfo: Optional[Dict] = {}
+    reactionInfo: Dict | None = None

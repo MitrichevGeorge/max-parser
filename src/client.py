@@ -1,6 +1,5 @@
 import asyncio
 
-from rich import table
 from classes import AttachType, ConfigContainer, Message, UserProfile, Chat, ServerData
 import payloads as pl
 from typing import Any, Dict, List
@@ -11,8 +10,14 @@ from network import NetworkMixin
 from tools import RussianPhoneValidator, any_without, read_number, ask, sel
 from settings import stg
 import socket
+
+import questionary
 from prompt_toolkit.patch_stdout import patch_stdout
 
+
+def bye():
+    print("bye")
+    exit(0)
 
 class Client(NetworkMixin):
     profile: UserProfile
@@ -148,17 +153,27 @@ class Tuiclient(Client):
                 raise ValueError
             self.chats_by_id[chat_id].info()
             norm_chat = await self.norm_chat(chat_id)
-            len_norm_chat = len(norm_chat)
+            
             while True:
-                select = await sel(list(map(itemgetter(1), norm_chat))+["Send message", "Back", "Main menu"], "Messages")
+                select = await sel(list(map(itemgetter(1), norm_chat))+["Send message", "Back", "Main menu", "Delete chat"], "Messages")
+                if not select:
+                    bye()
                 match select - len(norm_chat):
                     case 0:
                         text: str = await ask()
-                        await self.send_message(chat_id, text)
+                        message = await self.send_message(chat_id, text)
+                        msg_list = self.chats_by_id[chat_id].messages
+                        if msg_list:
+                            msg_list.append(message)
+                        else:
+                            print("Message list is none")
                     case 1:
                         break
                     case 2:
                         return
+                    case 3:
+                        for_all = await questionary.confirm(f"Delete for all?", default=False, auto_enter=True).ask_async()
+                        await self.delete_chat(chat_id, for_all)
                     case _:
                         msg_id = norm_chat[select][2]
                         msg_by_id = self.chats_by_id[chat_id].messages_by_id
@@ -201,6 +216,10 @@ class Tuiclient(Client):
                                 print("Nothing found")
                             else:
                                 result.info()
+                                if await questionary.confirm(f"Send message to {result.get_name()}?", default=False, auto_enter=True).ask_async():
+                                    text = await ask("message ->")
+                                    msg = await self.send_message(result.id, text, False)
+                                    await self.message_info(msg)
                         case 2:
                             user_id = await read_number("User id", 9_900_000, 900_000_000)
                             await self.update_missing_users([user_id])
@@ -208,16 +227,21 @@ class Tuiclient(Client):
                                 print(f"ID {user_id} not found")
                                 continue
                             self.users_by_id[user_id].info()
+                        case 3:
+                            pass
+                        case _:
+                            bye()
                 case _:
-                    print("bye")
-                    return
+                    bye()
 
 
 async def main():
     with patch_stdout(raw=True):
         q = Tuiclient()
-        await q.begin()
-        await q.disconnect()
+        try:
+            await q.begin()
+        finally:
+            await q.disconnect()
 
 if __name__ == "__main__":
     asyncio.run(main())

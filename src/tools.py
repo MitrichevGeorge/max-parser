@@ -21,6 +21,8 @@ class UniversalEncoder(json.JSONEncoder):
 
 from typing import Annotated
 from pydantic import BeforeValidator, PlainSerializer
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 def parse_on_off(value: Any) -> bool:
     match value:
@@ -41,6 +43,13 @@ OnOffBool = Annotated[
     BeforeValidator(parse_on_off),
     PlainSerializer(serialize_on_off, return_type=str)
 ]
+
+def parse_ms_to_datetime(value):
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value / 1000, tz=ZoneInfo("Europe/Moscow"))
+    return value
+
+MSKTimestamp = Annotated[datetime, BeforeValidator(parse_ms_to_datetime)]
 
 
 from questionary import Validator, ValidationError, Choice
