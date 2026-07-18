@@ -178,6 +178,7 @@ class NetworkMixin:
         await self._send(Opcodes.GET_MESSAGES, {'chatId': chatID, 'from': int(d_from.timestamp() * 1000), 'forward': 0, 'backward': backward, 'getMessages': True})
         response = await self.wait_for_opcode(Opcodes.GET_MESSAGES)
         adapter = TypeAdapter(List[Message])
+        open("src/w3.json", "w").write(json.dumps(response, cls=UniversalEncoder, indent=2))
         return adapter.validate_python(response["payload"]["messages"])
 
     async def get_file_url(self, fileId: int, chatId: int, messageId: int) -> str:
@@ -195,8 +196,9 @@ class NetworkMixin:
         last_time = time.time_ns() // 1_000_000
         await self._send(Opcodes.DEELETE_CHAT, {'chatId': chatId, 'lastEventTime': last_time, 'forAll': forAll})
         response = await self.wait_for_opcode(Opcodes.DEELETE_CHAT)
-        open("src/w3.json", "w").write(json.dumps(response, cls=UniversalEncoder, indent=2))
-
+        if response["cmd"] == 1:
+            return
+        raise RuntimeError(response["payload"].get("error"))
 
 
 

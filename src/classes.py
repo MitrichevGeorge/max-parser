@@ -201,6 +201,8 @@ class AttachType(StrEnum):
     PHOTO = "PHOTO"
     FILE = "FILE"
     VIDEO = "VIDEO"
+    CALL = "CALL"
+    POLL = "POLL"
 
 class BaseAttach(BaseModel):
     def info(self):
@@ -246,6 +248,38 @@ class FileAttach(BaseAttach):
     name: str
     fileId: int
     token: str
+
+class HangupTypes(StrEnum):
+    REJECTED = "REJECTED"
+    HUNGUP = "HUNGUP"
+
+class CallTypes(StrEnum):
+    AUDIO = "AUDIO"
+    VIDEO = "VIDEO"
+
+class CallAttach(BaseAttach):
+    type: Literal[AttachType.CALL] = Field(default=AttachType.CALL, alias="_type")
+    duration: int
+    conversationId: str
+    hangupType: HangupTypes
+    callType: CallTypes
+
+class PollAnswer(BaseModel):
+    answerId: int
+    text: str
+
+class PollState(BaseModel):
+    total: int
+    voterPreviewIds: List[int]
+
+class PollAttach(BaseAttach):
+    type: Literal[AttachType.POLL] = Field(default=AttachType.POLL, alias="_type")
+    settings: int
+    pollId: int
+    title: str
+    version: int
+    state: PollState
+
 
 Attach = Annotated[
     Union[ControlAttach, PhotoAttach, VideoAttach, FileAttach],

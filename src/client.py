@@ -145,6 +145,8 @@ class Tuiclient(Client):
         norm_chatlist = await self.norm_chatlist(new_type=True)
         while True:
             select = await sel(list(map(itemgetter(1), norm_chatlist))+["Back"], "Chats")
+            if not isinstance(select, int):
+                bye()
             if select >= len(norm_chatlist):
                 return
             
@@ -156,7 +158,7 @@ class Tuiclient(Client):
             
             while True:
                 select = await sel(list(map(itemgetter(1), norm_chat))+["Send message", "Back", "Main menu", "Delete chat"], "Messages")
-                if not select:
+                if not isinstance(select, int):
                     bye()
                 match select - len(norm_chat):
                     case 0:
@@ -179,9 +181,6 @@ class Tuiclient(Client):
                         msg_by_id = self.chats_by_id[chat_id].messages_by_id
                         if msg_by_id:
                             message = msg_by_id[msg_id]
-                            if len(message.attaches) > 0:
-                                if message.attaches[0].type == AttachType.FILE:
-                                    print(await self.get_file_url(message.attaches[0].fileId, chat_id, message.id))
                             await self.message_info(message)
             
 
