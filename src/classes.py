@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, Literal, Annotated, Union
 from enum import StrEnum
 from pydantic import BaseModel, Field, field_validator
-from tools import OnOffBool, MSKTimestamp, format_bytes
+from tools import OnOffBool, MSKTimestamp, format_bytes, format_duration
 
 class NameInfo(BaseModel):
     name: str
@@ -203,7 +203,17 @@ class AttachType(StrEnum):
     VIDEO = "VIDEO"
     CALL = "CALL"
     POLL = "POLL"
+    SHARE = "SHARE"
 
+class HangupTypes(StrEnum):
+    REJECTED = "REJECTED"
+    HUNGUP = "HUNGUP"
+
+class CallTypes(StrEnum):
+    AUDIO = "AUDIO"
+    VIDEO = "VIDEO"
+
+CALL_TYPE_TEXT = {CallTypes.AUDIO: 'audio', CallTypes.VIDEO: 'video'}
 class BaseAttach(BaseModel):
     def info(self):
         if isinstance(self, ControlAttach):
@@ -214,6 +224,11 @@ class BaseAttach(BaseModel):
             return f'{self.name} [{format_bytes(self.size)}]'
         if isinstance(self, VideoAttach):
             return f'[V] {self.description} [{self.thumbnail}] {self.width}x{self.height}'
+        if isinstance(self, CallAttach):
+            return f'{CALL_TYPE_TEXT[self.callType]} call {self.hangupType} {format_duration(self.duration)} [{self.conversationId}]'
+        if isinstance(self, PollAttach):
+            return f'[Poll] {[i.text for i in self.answers]} {self.state.total} voted'
+        return "idk"
 
 class ControlAttach(BaseAttach):
     type: Literal[AttachType.CONTROL] = Field(default=AttachType.CONTROL, alias="_type")
@@ -238,7 +253,7 @@ class VideoAttach(BaseAttach):
     videoType: int
     width: int
     height: int
-    description: str
+    description: str | None = None
     videoId: int
     token: str
 
@@ -248,14 +263,6 @@ class FileAttach(BaseAttach):
     name: str
     fileId: int
     token: str
-
-class HangupTypes(StrEnum):
-    REJECTED = "REJECTED"
-    HUNGUP = "HUNGUP"
-
-class CallTypes(StrEnum):
-    AUDIO = "AUDIO"
-    VIDEO = "VIDEO"
 
 class CallAttach(BaseAttach):
     type: Literal[AttachType.CALL] = Field(default=AttachType.CALL, alias="_type")
@@ -279,12 +286,29 @@ class PollAttach(BaseAttach):
     title: str
     version: int
     state: PollState
+    answers: List[PollAnswer]
 
+class ShareAttach(BaseAttach):
+    type: Literal[AttachType.SHARE] = Field(default=AttachType.SHARE, alias="_type")
+    description: str
+    contentLevel: bool
+    shareId: int
+    title: str
+    url: str
 
 Attach = Annotated[
-    Union[ControlAttach, PhotoAttach, VideoAttach, FileAttach],
+    Union[ControlAttach, PhotoAttach, VideoAttach, FileAttach, CallAttach, PollAttach, ShareAttach],
     Field(discriminator='type')
 ]
+
+class MessageLinkTypes(StrEnum):
+    FORWARD = "FORWARD"
+    REPLY = "REPLY"
+
+class MessageLink(BaseModel):
+    type: MessageLinkTypes
+    message: Message
+    chatId: int
 
 class Message(BaseModel):
     id: int
@@ -293,3 +317,13 @@ class Message(BaseModel):
     text: str
     attaches: List[Attach]
     reactionInfo: Dict | None = None
+    link: MessageLink | None = None
+
+class VideoUrls(BaseModel):
+    mp4_720: str = Field(alias="MP4_720")
+    mp4_1080: str | None = Field(default=None, alias="MP4_1080")
+    external: str = Field(alias="EXTERNAL")
+    cache: bool
+
+    def __str__(self):
+        return self.mp4_1080 or self.mp4_720 or ""

@@ -1,6 +1,6 @@
 import asyncio
 
-from classes import AttachType, ConfigContainer, Message, UserProfile, Chat, ServerData
+from classes import Attach, AttachType, ConfigContainer, FileAttach, Message, UserProfile, Chat, ServerData, VideoAttach
 import payloads as pl
 from typing import Any, Dict, List
 from operator import itemgetter
@@ -89,15 +89,22 @@ class Client(NetworkMixin):
 
         return [format_chat(chat, idx) for idx, chat in enumerate(self.chats)]
 
-    async def message_info(self, message: Message, tab: int = 0):
+    async def get_attach_info(self, attach: Attach, chatId: int, messageId: int) -> str:
+        if isinstance(attach, FileAttach):
+            return await self.get_file_url(attach.fileId, chatId, messageId)
+        if isinstance(attach, VideoAttach):
+            return str(await self.get_video_urls(attach.videoId, attach.token, chatId, messageId))
+        return ""
+
+    async def message_info(self, message: Message, chatId: int, tab: int = 0):
         await self.update_missing_users([message.sender])
         indent = "│" * tab
         child_indent = "│" * (tab + 1)
-        print(f'{indent}┌{"─"*4} {message.time.strftime("%d.%m.%Y %H:%M:%S")}')
+        print(f'{indent}┌{"─"*4} {message.time.strftime("%d.%m.%Y %H:%M:%S")} {message.link.type if message.link else ""}')
         print(f'{child_indent}ID: {message.id}')
         print(f'{child_indent}Sender: [{message.sender}] {self.users_by_id[message.sender].get_name()}')
         print(f'{child_indent}Text: {message.text.replace("\n", "\n"+"│"*(tab+2))}')
-        print(f'{child_indent}Attaches: { [i.info() for i in message.attaches] }')
+        print(f'{child_indent}Attaches: { [' '.join((i.info(), await self.get_attach_info(i, chatId, message.id))) for i in message.attaches] }')
         print(f'{child_indent}ReactionInfo: {message.reactionInfo}')
         print(f'{indent}└{"─"*6}')
 
@@ -181,7 +188,7 @@ class Tuiclient(Client):
                         msg_by_id = self.chats_by_id[chat_id].messages_by_id
                         if msg_by_id:
                             message = msg_by_id[msg_id]
-                            await self.message_info(message)
+                            await self.message_info(message, chat_id)
             
 
     async def begin(self):
@@ -218,7 +225,7 @@ class Tuiclient(Client):
                                 if await questionary.confirm(f"Send message to {result.get_name()}?", default=False, auto_enter=True).ask_async():
                                     text = await ask("message ->")
                                     msg = await self.send_message(result.id, text, False)
-                                    await self.message_info(msg)
+                                    await self.message_info(msg, result.id)
                         case 2:
                             user_id = await read_number("User id", 9_900_000, 900_000_000)
                             await self.update_missing_users([user_id])

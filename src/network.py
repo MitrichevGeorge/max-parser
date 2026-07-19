@@ -14,7 +14,7 @@ from operator import itemgetter
 from datetime import datetime
 from enum import IntEnum
 
-from classes import Chat, ConfigContainer, ServerData, UserProfile, Message
+from classes import Chat, ConfigContainer, ServerData, UserProfile, Message, VideoUrls
 from convert import PacketCodec
 import payloads as pl
 from settings import stg
@@ -33,6 +33,7 @@ class Opcodes(IntEnum):
     GET_INFOS = 32
     GET_MESSAGES = 49
     GET_FILE_URL = 88
+    GET_VIDEO_URLS = 83
     SEND_MESAGE = 64
     DEELETE_CHAT = 52
 
@@ -174,17 +175,22 @@ class NetworkMixin:
             return adapter.validate_python(response["payload"]["contacts"])
         raise RuntimeError
 
-    async def get_messages(self, chatID: int, d_from: datetime = datetime.now(), backward: int = 60) -> List[Message]:
+    async def get_messages(self, chatID: int, d_from: datetime = datetime.now(), backward: int = 100) -> List[Message]:
         await self._send(Opcodes.GET_MESSAGES, {'chatId': chatID, 'from': int(d_from.timestamp() * 1000), 'forward': 0, 'backward': backward, 'getMessages': True})
         response = await self.wait_for_opcode(Opcodes.GET_MESSAGES)
         adapter = TypeAdapter(List[Message])
-        open("src/w3.json", "w").write(json.dumps(response, cls=UniversalEncoder, indent=2))
         return adapter.validate_python(response["payload"]["messages"])
 
     async def get_file_url(self, fileId: int, chatId: int, messageId: int) -> str:
         await self._send(Opcodes.GET_FILE_URL, {'fileId': fileId, 'chatId': chatId, 'messageId': messageId})
         response = await self.wait_for_opcode(Opcodes.GET_FILE_URL)
         return response["payload"]["url"]
+
+    async def get_video_urls(self, videoId: int, token: str, chatId: int, messageId: int) -> VideoUrls:
+        await self._send(Opcodes.GET_VIDEO_URLS, {'videoId': videoId, 'token': token, 'chatId': chatId, 'messageId': messageId})
+        response = await self.wait_for_opcode(Opcodes.GET_VIDEO_URLS)
+        open("src/w3.json", "w").write(json.dumps(response, cls=UniversalEncoder, indent=2))
+        return VideoUrls.model_validate(response["payload"])
 
     async def send_message(self, chatId: int, text: str, notify: bool = True) -> Message:
         cid = -(time.time_ns() // 1_000_000)

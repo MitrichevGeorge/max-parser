@@ -127,3 +127,22 @@ def format_bytes(size_bytes: int, use_binary: bool = True, precision: int = 2) -
     value = size_bytes / (factor ** exponent)
     return f"{value:.{precision}f} {units[exponent]}"
 
+def format_duration(seconds: int) -> str:
+    if seconds < 0:
+        raise ValueError("Time cant be less than 0")
+    if seconds == 0:
+        return "0 сек"
+
+    time_units = [
+        ("ч", 3600),
+        ("мин", 60),
+        ("сек", 1)
+    ]    
+    parts = []
+    remaining_seconds = seconds
+    for label, unit_seconds in time_units:
+        value, remaining_seconds = divmod(remaining_seconds, unit_seconds)
+        if value > 0:
+            parts.append(f"{value} {label}")
+            
+    return " ".join(parts)
