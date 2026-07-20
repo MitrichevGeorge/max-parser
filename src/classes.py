@@ -185,7 +185,7 @@ class ServerConfig(BaseModel):
 
 
 class ConfigContainer(BaseModel):
-    chats: Dict[int, ChatConfig]
+    chats: Dict[int, ChatConfig] | None = None
     user: UserAccountConfig
     server: ServerConfig
 

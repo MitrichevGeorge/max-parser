@@ -6,7 +6,8 @@ from typing import Any, Dict, List
 from operator import itemgetter
 from loguru import logger
 import sys
-from network import NetworkMixin
+from network import NetworkMixin, ServerError, WrongPhoneError
+import captcha
 from tools import RussianPhoneValidator, any_without, read_number, ask, sel
 from settings import stg
 import socket
@@ -29,14 +30,16 @@ class Client(NetworkMixin):
 
     def __init__(self) -> None:
         self._netw_init()
+        self.token = ""
 
-    async def connect(self):
-        data = ServerData.model_validate(await self._netw_connect())
+    async def finalise_auth(self):
+        data = ServerData.model_validate(await self._netw_auth(self.token))
         self.profile = data.profile.contact
         self.contacts = data.contacts
         self.chats = data.chats
         self.chats_by_id = {i.id: i for i in self.chats}
         self.config = data.config
+
 
     async def disconnect(self):
         if self.connection:
@@ -81,7 +84,7 @@ class Client(NetworkMixin):
                     raise ValueError(f"Missing title for chat ID {chat.id}")
                 name = chat.title
 
-            config = self.config.chats.get(chat.id)
+            config = self.config.chats.get(chat.id) if self.config.chats else None
             muted = " muted" if config and config.dontDisturbUntil == -1 else ""
             
             line = f"[{chat.type}][{chat.id}] {name} - {chat.messagesCount}{muted}"
@@ -146,6 +149,45 @@ class Tuiclient(Client):
             print(f"Logserver not running(port {stg.LOGS_PORT}). Logging here")
             logger.add(sys.stdout, colorize=True, format="<green>{time:HH:mm:ss}</green> | {level} | {message}")
 
+    async def connect(self):
+        await self._netw_connect()
+        match await sel(["Use config token", "Enter token", "Auth by number"]):
+            case 0:
+                self.token = stg.ONEME_AUTH["token"]
+            case 1:
+                self.token = await ask("token ->")
+            case 2:
+                phone_number = await ask("phone number ->", validator=RussianPhoneValidator())
+                captcha_url = await self.get_captcha_url(phone_number)
+                while True:
+                    try:
+                        captcha_token = await captcha.solve(captcha_url)
+                        await self.disconnect()
+                        await self._netw_connect()
+                        auth_token = await self.send_verify_code(phone_number, captcha_token)
+                        break
+                    except WrongPhoneError as err:
+                        print(err)
+                        phone_number = await ask("phone number ->", validator=RussianPhoneValidator())
+                    except ServerError as err:
+                        print(err)
+
+
+                while True:
+                    try:
+                        verify_code = await ask("verify code ->")
+                        self.token = await self.check_verify_code(auth_token, verify_code)
+                        break
+                    except ServerError as err:
+                        print(err)
+                print(self.token)
+            case _:
+                bye()
+        try:
+            await self.finalise_auth()
+        except ServerError as err:
+            print(err)
+            bye()
 
     async def chats_list(self):
         print("Chats:")
@@ -182,20 +224,22 @@ class Tuiclient(Client):
                         return
                     case 3:
                         for_all = await questionary.confirm(f"Delete for all?", default=False, auto_enter=True).ask_async()
-                        await self.delete_chat(chat_id, for_all)
+                        try:
+                            await self.delete_chat(chat_id, for_all)
+                        except ServerError as err:
+                            print(err)
                     case _:
                         msg_id = norm_chat[select][2]
                         msg_by_id = self.chats_by_id[chat_id].messages_by_id
                         if msg_by_id:
                             message = msg_by_id[msg_id]
                             await self.message_info(message, chat_id)
-            
 
     async def begin(self):
         await self._init_log()
         await self.connect()
         while True:
-            match await sel(["Profile info", "Contacts", "Chats list", "Limits and config", "User infos", "Exit"], "Main menu"):
+            match await sel(["Profile info", "Contacts", "Chats list", "Limits and config", "User infos", "Logout", "Exit"], "Main menu"):
                 case 0:
                     self.profile.info()
                 case 1:
@@ -237,9 +281,11 @@ class Tuiclient(Client):
                             pass
                         case _:
                             bye()
+                case 5:
+                    await self.logout()
+                    print("logged out")
                 case _:
                     bye()
-
 
 async def main():
     with patch_stdout(raw=True):
