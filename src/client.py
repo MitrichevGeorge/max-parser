@@ -171,7 +171,7 @@ class Tuiclient(Client):
                         phone_number = await ask("phone number ->", validator=RussianPhoneValidator())
                     except ServerError as err:
                         print(err)
-
+                        bye()
 
                 while True:
                     try:
