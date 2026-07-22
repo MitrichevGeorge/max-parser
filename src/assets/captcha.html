@@ -65,7 +65,8 @@
         border: 0;
         display: block;
       }
-      #success {
+      #success,
+      #blocker {
         position: fixed;
         inset: 0;
         display: none;
@@ -77,7 +78,8 @@
         background: inherit;
         z-index: 200;
       }
-      #success.visible {
+      #success.visible,
+      #blocker.visible {
         display: flex;
       }
       .check {
@@ -109,6 +111,58 @@
         color: #94a3b8;
         margin: 0;
       }
+      .cross {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        background: rgba(239, 68, 68, 0.12);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 2px solid rgba(239, 68, 68, 0.3);
+        position: relative;
+      }
+      .cross::before,
+      .cross::after {
+        content: '';
+        position: absolute;
+        width: 28px;
+        height: 4px;
+        background: #ef4444;
+        border-radius: 2px;
+      }
+      .cross::before {
+        transform: rotate(45deg);
+      }
+      .cross::after {
+        transform: rotate(-45deg);
+      }
+      .blocker-title {
+        font-size: 24px;
+        font-weight: 600;
+        color: #ef4444;
+        margin: 0;
+      }
+      .blocker-sub {
+        font-size: 14px;
+        color: #94a3b8;
+        margin: 0;
+        max-width: 420px;
+        line-height: 1.5;
+      }
+      .refresh-btn {
+        padding: 10px 20px;
+        border-radius: 999px;
+        border: 1px solid rgba(239, 68, 68, 0.5);
+        background: rgba(239, 68, 68, 0.12);
+        color: #ef4444;
+        cursor: pointer;
+        font-size: 14px;
+        transition: background 0.2s;
+      }
+      .refresh-btn:hover {
+        background: rgba(239, 68, 68, 0.22);
+      }
     </style>
   </head>
   <body>
@@ -116,36 +170,108 @@
       <div class="indicator spin" id="indicator"></div>
       <span id="status-text">Загрузка капчи...</span>
     </div>
+
     <iframe id="captcha-frame"></iframe>
+
     <div id="success">
       <div class="check"></div>
       <p class="success-title">Можно закрыть вкладку</p>
       <p class="success-sub">Капча успешно решена</p>
     </div>
+
+    <div id="blocker">
+      <div class="cross"></div>
+      <p class="blocker-title">Запросы заблокированы</p>
+      <p class="blocker-sub">
+        Privacy Badger (или другой блокировщик) не даёт загрузить ресурсы VK.
+        Для решения капчи отключите расширение для этого сайта и обновите страницу.
+      </p>
+      <button class="refresh-btn" onclick="location.reload()">Обновить страницу</button>
+    </div>
+
     <script>
+      const BLOCKER_CHECK_URL = 'https://static.vk.ru/not_robot_captcha.css?pb_check=' + Date.now();
+
+      const statusEl = document.getElementById('status');
+      const indicatorEl = document.getElementById('indicator');
+      const statusTextEl = document.getElementById('status-text');
+      const captchaFrame = document.getElementById('captcha-frame');
+      const successEl = document.getElementById('success');
+      const blockerEl = document.getElementById('blocker');
+
+      let pollTimer = null;
+      let blocked = false;
+
+      function setStatus(message, indicatorClass) {
+        statusTextEl.textContent = message;
+        indicatorEl.className = 'indicator ' + (indicatorClass || '');
+      }
+
+      function showSuccess() {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        statusEl.classList.add('hidden');
+        successEl.classList.add('visible');
+      }
+
+      function showBlocker(url) {
+        if (blocked) return;
+        blocked = true;
+
+        clearInterval(pollTimer);
+        pollTimer = null;
+
+        statusEl.classList.add('hidden');
+        successEl.classList.remove('visible');
+        blockerEl.classList.add('visible');
+
+        if (url) {
+          console.warn('Blocked resource detected:', url);
+        }
+      }
+
+      async function detectBlockedDomain() {
+        if (!navigator.onLine) return false;
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 3000);
+
+        try {
+          await fetch(BLOCKER_CHECK_URL, {
+            method: 'HEAD',
+            mode: 'no-cors',
+            cache: 'no-store',
+            signal: controller.signal,
+          });
+          clearTimeout(timeout);
+          return false;
+        } catch (err) {
+          clearTimeout(timeout);
+          if (err && err.name === 'AbortError') return false;
+          return true;
+        }
+      }
+
+      window.addEventListener('message', (e) => {
+        if (e.origin !== location.origin) return;
+        if (e.data && e.data.type === 'vk-proxy-blocked') {
+          showBlocker(e.data.url);
+        }
+      });
+
       async function init() {
-        const statusEl = document.getElementById('status');
-        const indicatorEl = document.getElementById('indicator');
-        const statusTextEl = document.getElementById('status-text');
-        const captchaFrame = document.getElementById('captcha-frame');
-        const successEl = document.getElementById('success');
-
-        const setStatus = (message, indicatorClass) => {
-          statusTextEl.textContent = message;
-          indicatorEl.className = 'indicator ' + (indicatorClass || '');
-        };
-
-        const showSuccess = () => {
-          statusEl.classList.add('hidden');
-          successEl.classList.add('visible');
-        };
-
         try {
           const response = await fetch('/captcha-url', { cache: 'no-store' });
           if (!response.ok) throw new Error('HTTP ' + response.status);
 
           const data = await response.json();
           if (data.error) throw new Error(data.error);
+
+          const isBlocked = await detectBlockedDomain();
+          if (isBlocked) {
+            showBlocker();
+            return;
+          }
 
           const frameUrl = new URL('/captcha-html', location.origin);
           frameUrl.searchParams.set('url', data.url);
@@ -154,13 +280,14 @@
           setStatus('Решите капчу', 'spin');
 
           let missCount = 0;
-          const pollTimer = setInterval(async () => {
+          pollTimer = setInterval(async () => {
             try {
               await fetch('/captcha-url', { cache: 'no-store' });
               missCount = 0;
             } catch {
               if (++missCount >= 2) {
                 clearInterval(pollTimer);
+                pollTimer = null;
                 showSuccess();
               }
             }

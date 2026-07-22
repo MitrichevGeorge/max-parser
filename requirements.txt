@@ -12,3 +12,8 @@ pandas
 
 aiohttp
 uvicorn
+fastapi
+httpx
+
+cryptography
+argon2-cffi

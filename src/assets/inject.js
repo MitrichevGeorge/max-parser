@@ -15,6 +15,23 @@
     return null;
   }
 
+  function isTracked(url) {
+    return DOMAINS.some((d) => String(url).includes(d));
+  }
+
+  let blockReported = false;
+  function reportBlocked(url) {
+    if (blockReported) return;
+    blockReported = true;
+
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage(
+        { type: 'vk-proxy-blocked', url: String(url) },
+        '*'
+      );
+    }
+  }
+
   const originalFetch = window.fetch;
   window.fetch = async function (input, init) {
     let url = '';
@@ -51,4 +68,26 @@
     navigator.sendBeacon = (url, data) =>
       originalSendBeacon(toProxy(url) || url, data);
   }
+
+  window.addEventListener(
+    'error',
+    function (e) {
+      const t = e.target;
+      if (!t) return;
+
+      const url = t.src || t.href || t.currentSrc;
+      if (url && isTracked(url)) {
+        reportBlocked(url);
+      }
+    },
+    true
+  );
+  
+  setTimeout(() => {
+    document.querySelectorAll('link[rel="stylesheet"]').forEach((link) => {
+      if (isTracked(link.href) && !link.sheet) {
+        reportBlocked(link.href);
+      }
+    });
+  }, 2000);
 })();

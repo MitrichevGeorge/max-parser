@@ -9,6 +9,8 @@ import sys
 from network import NetworkMixin, ServerError, WrongPhoneError
 import captcha
 from tools import RussianPhoneValidator, any_without, read_number, ask, sel
+from crypt import VaultManager
+from pathlib import Path
 from settings import stg
 import socket
 
@@ -236,6 +238,7 @@ class Tuiclient(Client):
                             await self.message_info(message, chat_id)
 
     async def begin(self):
+        self.vault = VaultManager(Path(".tokens"))
         await self._init_log()
         await self.connect()
         while True:
