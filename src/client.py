@@ -9,7 +9,7 @@ from loguru import logger
 import sys
 from network import NetworkMixin, ServerError, WrongPhoneError
 import captcha
-from tools import RussianPhoneValidator, any_without, read_number, ask, sel
+from tools import RussianPhoneValidator, any_without, ask_exact, read_number, ask, sel, sel_str, bye
 from crypt import ClientVault, InvalidPasswordError, TokenModel
 from pathlib import Path
 from logserver import LOGS_PORT
@@ -19,10 +19,6 @@ from datetime import datetime
 import questionary
 from prompt_toolkit.patch_stdout import patch_stdout
 
-
-def bye() -> NoReturn:
-    print("bye")
-    sys.exit(0)
 
 class Client(NetworkMixin):
     profile: UserProfile
@@ -191,8 +187,6 @@ class Tuiclient(Client):
             options = [*map(self._format_token_variant, tokens), "Enter token", "Auth by number"]
             
             selection_idx = await sel(options)
-            if selection_idx is None:
-                bye()
 
             is_existing_token = selection_idx < len(tokens)
             if is_existing_token:
@@ -206,8 +200,6 @@ class Tuiclient(Client):
                 await self.finalise_auth()
                 if not is_existing_token:
                     selected = await questionary.confirm("Save this token?", default=True, auto_enter=True).ask_async()
-                    if selected is None:
-                        bye()
                     if selected:
                         new_token = TokenModel(token=self.token, login_at=datetime.now(), last_visit_at=datetime.now(), username=self.profile.get_name())
                         self.vault.tokens.append(new_token)
@@ -223,8 +215,6 @@ class Tuiclient(Client):
                 print(err)
                 if is_existing_token:
                     selected = await questionary.confirm("Remove this token?", default=False, auto_enter=False).ask_async()
-                    if selected is None:
-                        bye()
                     if selected:
                         del self.vault.tokens[selection_idx]
                         self.vault.save()
@@ -234,8 +224,6 @@ class Tuiclient(Client):
         norm_chatlist = await self.norm_chatlist(new_type=True)
         while True:
             select = await sel(list(map(itemgetter(1), norm_chatlist))+["Back"], "Chats")
-            if not isinstance(select, int):
-                bye()
             if select >= len(norm_chatlist):
                 return
             
@@ -247,8 +235,6 @@ class Tuiclient(Client):
             
             while True:
                 select = await sel(list(map(itemgetter(1), norm_chat))+["Send message", "Back", "Main menu", "Delete chat"], "Messages")
-                if not isinstance(select, int):
-                    bye()
                 match select - len(norm_chat):
                     case 0:
                         text: str = await ask()
@@ -284,19 +270,19 @@ class Tuiclient(Client):
         await self.select_account()
         while True:
             print(f"[{self.profile.id}] {self.profile.get_name()}")
-            match await sel(["Profile info", "Contacts", "Chats list", "Limits and config", "User infos", "Swap account", "Logout", "Exit"], "Main menu"):
-                case 0:
+            match await sel_str(["Profile info", "Contacts", "Chats list", "Limits and config", "User infos", "Swap account", "Delete account", "Logout", "Exit"], "Main menu"):
+                case "Profile info":
                     self.profile.info()
-                case 1:
+                case "Contacts":
                     print("Contacts:")
                     [i.info(1) for i in self.contacts]
-                case 2:
+                case "Chats list":
                     await self.chats_list()
-                case 3:
+                case "Limits and config":
                     self.config.server.info()
-                case 4:
-                    match await sel(["Search chats", "Search by number", "Get user by id", "Back"]):
-                        case 0:
+                case "User infos":
+                    match await sel_str(["Search chats", "Search by number", "Get user by id", "Back"]):
+                        case "Search chats":
                             query = await ask("query ->")
                             result = await self.search(query)
                             if len(result) == 0:
@@ -304,7 +290,7 @@ class Tuiclient(Client):
                             else:
                                 for i in result:
                                     i.info()
-                        case 1:
+                        case "Search by number":
                             query = await ask("phone number ->", validator=RussianPhoneValidator())
                             result = await self.search_number(query)
                             if not result:
@@ -315,20 +301,21 @@ class Tuiclient(Client):
                                     text = await ask("message ->")
                                     msg = await self.send_message(result.id, text, False)
                                     await self.message_info(msg, result.id)
-                        case 2:
+                        case "Get user by id":
                             user_id = await read_number("User id", 9_900_000, 900_000_000)
                             await self.update_missing_users([user_id])
                             if not user_id in self.users_by_id:
                                 print(f"ID {user_id} not found")
                                 continue
                             self.users_by_id[user_id].info()
-                        case 3:
+                        case "Back":
                             pass
-                        case _:
-                            bye()
-                case 5:
+                case "Delete account":
+                    if await ask_exact(f"Are u sure u want to delete account {self.profile.get_name()}? ->"):
+                        await self.delete_account()
+                case "Swap account":
                     await self.select_account()
-                case 6:
+                case "Logout":
                     if await questionary.confirm(f"Log out from {self.profile.get_name()}?", default=False, auto_enter=False).ask_async():
                         await self.logout()
                         print("logged out")

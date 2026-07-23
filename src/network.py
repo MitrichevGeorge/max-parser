@@ -5,7 +5,7 @@ import time
 import uuid
 import traceback
 from collections import defaultdict
-from typing import List
+from typing import List, Dict, Any
 from loguru import logger
 from pydantic import TypeAdapter
 import websockets
@@ -19,7 +19,15 @@ import payloads as pl
 from tools import UniversalEncoder
 
 class ServerError(RuntimeError):
-    pass
+    def __init__(self, message: str = "", error: str = ""):
+        super().__init__(message)
+        self.error: str = error
+
+    @classmethod
+    def from_payload(cls, payload: Dict[str, Any]) -> "ServerError":
+        message = (payload.get("localizedMessage") or payload.get("message") or "Unknown server error")
+        error_code = str(payload.get("error", ""))
+        return cls(message, error=error_code)
 
 class WrongPhoneError(ServerError):
     pass
@@ -40,7 +48,8 @@ class Opcodes(IntEnum):
     GET_FILE_URL = 88
     GET_VIDEO_URLS = 83
     SEND_MESAGE = 64
-    DEELETE_CHAT = 52
+    DELETE_CHAT = 52
+    DELETE_ACCOUNT = 199
 
 def _save_json(file: str, data) -> None:
     with open(file, "w", encoding="utf-8") as f:
@@ -178,7 +187,7 @@ class NetworkMixin:
         if response['cmd'] == 1:
             adapter = TypeAdapter(List[UserProfile])
             return adapter.validate_python(response["payload"]["contacts"])
-        raise ServerError()
+        raise ServerError.from_payload(response["payload"])
 
     async def get_messages(self, chatID: int, dFrom: datetime = datetime.now(), backward: int = 100) -> List[Message]:
         await self._send(Opcodes.GET_MESSAGES, {'chatId': chatID, 'from': int(dFrom.timestamp() * 1000), 'forward': 0, 'backward': backward, 'getMessages': True})
@@ -204,11 +213,11 @@ class NetworkMixin:
 
     async def delete_chat(self, chatId: int, forAll: bool = True) -> None:
         last_time = time.time_ns() // 1_000_000
-        await self._send(Opcodes.DEELETE_CHAT, {'chatId': chatId, 'lastEventTime': last_time, 'forAll': forAll})
-        response = await self.wait_for_opcode(Opcodes.DEELETE_CHAT)
+        await self._send(Opcodes.DELETE_CHAT, {'chatId': chatId, 'lastEventTime': last_time, 'forAll': forAll})
+        response = await self.wait_for_opcode(Opcodes.DELETE_CHAT)
         if response["cmd"] == 1:
             return
-        raise ServerError(response["payload"]["message"])
+        raise ServerError.from_payload(response["payload"])
 
     async def get_captcha_url(self, phoneNumber: str) -> str:
         await self._send(Opcodes.GET_CAPTCHA, { 'source': 'auth', 'identifier': phoneNumber })
@@ -222,21 +231,28 @@ class NetworkMixin:
             return response["payload"]["token"]
         if response["payload"]["error"] == "error.phone.wrong":
             raise WrongPhoneError(response["payload"]["message"])
-        raise ServerError(response["payload"]["message"])
+        raise ServerError.from_payload(response["payload"])
 
     async def check_verify_code(self, token: str, verifyCode: str) -> str:
         await self._send(Opcodes.CHECK_VERIFY_CODE, {'token': token, 'verifyCode': verifyCode, 'authTokenType': 'CHECK_CODE'})
         response = await self.wait_for_opcode(Opcodes.CHECK_VERIFY_CODE)
         if response["cmd"] == 1:
             return response["payload"]["tokenAttrs"]["LOGIN"]["token"]
-        raise ServerError(response["payload"].get("localizedMessage") or response["payload"].get("message"))
+        raise ServerError.from_payload(response["payload"])
 
     async def logout(self) -> None:
         await self._send(Opcodes.LOGOUT, { })
         response = await self.wait_for_opcode(Opcodes.LOGOUT)
         if response["cmd"] == 1:
             return
-        raise ServerError(response["payload"].get("localizedMessage") or response["payload"].get("message"))
+        raise ServerError.from_payload(response["payload"])
+
+    async def delete_account(self) -> None:
+        await self._send(Opcodes.DELETE_ACCOUNT, {'delete': True, 'type': 0})
+        response = await self.wait_for_opcode(Opcodes.DELETE_ACCOUNT)
+        if response["cmd"] == 1:
+            return
+        raise ServerError.from_payload(response["payload"])
 
 
 # open("src/w3.json", "w").write(json.dumps(response, cls=UniversalEncoder, indent=2))

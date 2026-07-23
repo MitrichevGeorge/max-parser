@@ -1,7 +1,12 @@
-from typing import Iterable, Any, Final, List
+from typing import Iterable, Any, Final, List, NoReturn, Sequence
 import math
 import json
 import base64
+import sys
+
+def bye() -> NoReturn:
+    print("bye")
+    sys.exit(0)
 
 def any_without(lst: Iterable, val: Any) -> Any:
     for x in lst:
@@ -101,12 +106,33 @@ async def read_number(prompt_text: str = "", min_n: int | None = None, max_n: in
         exit(0)
     return int(user_input.strip())
 
-async def sel(menu_items: List[str], prompt_text: str = "") -> int:
-    return await questionary.select(
-        prompt_text,
-        choices=[Choice(title=item, value=idx) for idx, item in enumerate(menu_items)]
-    ).ask_async()
+async def sel(menu_items: Sequence[str], prompt_text: str = "") -> int:
+    if not menu_items:
+        raise ValueError("menu_items cannot be empty")
 
+    choices = [Choice(title=item, value=idx) for idx, item in enumerate(menu_items)]
+    result = await questionary.select(prompt_text, choices=choices).ask_async()
+    if result is None:
+        bye()
+
+    return result
+
+async def sel_str(menu_items: Sequence[str], prompt_text: str = "") -> str:
+    if not menu_items:
+        raise ValueError("menu_items cannot be empty")
+
+    result = await questionary.select(prompt_text, choices=list(menu_items)).ask_async()
+    if result is None:
+        bye()
+
+    return result
+
+async def ask_exact(prompt: str, check: str = "YES") -> bool:
+    result = await questionary.text(prompt, validate=lambda text: True if text == check else f"Нужно ввести именно '{check}'").ask_async()
+    if result is None:
+        bye()
+
+    return result == check
 
 BINARY_UNITS: Final[tuple[str, ...]] = ('B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB')
 DECIMAL_UNITS: Final[tuple[str, ...]] = ('B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB')
