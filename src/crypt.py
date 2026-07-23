@@ -7,14 +7,18 @@ import unicodedata
 from base64 import b64decode, b64encode
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, List, NoReturn, TypedDict, List, Dict
 
-import getpass
 from argon2.low_level import Type, hash_secret_raw
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
-__all__ = ["KDFParams", "VaultError", "CorruptVaultError", "InvalidPasswordError", "VaultManager", "VAULT_FILE"]
+from pydantic import BaseModel, ValidationError
+from datetime import datetime
+
+import questionary
+
+__all__ = ["KDFParams", "VaultError", "CorruptVaultError", "InvalidPasswordError", "ClientVault", "VaultModel", "TokenModel"]
 
 
 DEFAULT_MEMORY_COST: Final[int] = 256 * 1024   # 256 MiB
@@ -39,6 +43,10 @@ KEY_LEN: Final[int] = 32
 MAX_PLAINTEXT_SIZE: Final[int] = 512 * 1024      # 512 KiB
 MAX_VAULT_FILE_SIZE: Final[int] = 1024 * 1024    # 1 MiB
 
+
+def bye() -> NoReturn:
+    print("bye")
+    sys.exit(0)
 
 class VaultError(Exception):
     pass
@@ -79,11 +87,9 @@ class KDFParams:
 def _normalize_password(password: str) -> str:
     return unicodedata.normalize("NFKC", password)
 
-
 def _validate_password(password: str) -> None:
     if not isinstance(password, str) or not password:
         raise VaultError("Password must be a non-empty string")
-
 
 def _derive_key(password: str, salt: bytes, kdf: KDFParams) -> bytearray:
     normalized = _normalize_password(password)
@@ -94,17 +100,15 @@ def _derive_key(password: str, salt: bytes, kdf: KDFParams) -> bytearray:
         memory_cost=kdf.memory_cost,
         parallelism=kdf.parallelism,
         hash_len=KEY_LEN,
-        type=Type.ID,
+        type=Type.ID
     )
     return bytearray(raw)
-
 
 def _zero(key: bytearray | None) -> None:
     if key is None:
         return
     for i in range(len(key)):
         key[i] = 0
-
 
 def _build_aad(kdf: KDFParams, salt: bytes, nonce: bytes) -> bytes:
     return (
@@ -116,28 +120,8 @@ def _build_aad(kdf: KDFParams, salt: bytes, nonce: bytes) -> bytes:
         + nonce
     )
 
-
-def _serialize_data(data: dict[str, Any]) -> bytes:
-    return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-
-
 def _is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
-
-
-def _validate_plaintext_data(data: Any) -> dict[str, Any]:
-    if not isinstance(data, dict):
-        raise CorruptVaultError("Vault data must be a JSON object")
-
-    users = data.get("users")
-    if not isinstance(users, list) or not all(isinstance(u, str) for u in users):
-        raise CorruptVaultError("'users' must be a list of strings")
-
-    settings = data.get("settings")
-    if not isinstance(settings, dict):
-        raise CorruptVaultError("'settings' must be a JSON object")
-
-    return data
 
 class VaultManager:
     def __init__(self, path: Path = VAULT_FILE) -> None:
@@ -146,10 +130,10 @@ class VaultManager:
     def exists(self) -> bool:
         return self._path.exists()
 
-    def create(self, password: str, data: dict[str, Any], kdf: KDFParams | None = None) -> None:
+    def create(self, password: str, data: VaultModel, kdf: KDFParams | None = None) -> None:
         self._write_encrypted(password, data, kdf)
 
-    def open(self, password: str) -> dict[str, Any]:
+    def open(self, password: str) -> VaultModel:
         _validate_password(password)
         if STRICT_CHECK:
             self._check_file_permissions()
@@ -182,13 +166,13 @@ class VaultManager:
             )
 
         try:
-            data = json.loads(plaintext.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            data = VaultModel.model_validate_json(plaintext.decode("utf-8"))
+        except (ValidationError, UnicodeDecodeError) as exc:
             raise CorruptVaultError("Plaintext is not valid JSON") from exc
 
-        return _validate_plaintext_data(data)
+        return data
 
-    def save(self, password: str, data: dict[str, Any], kdf: KDFParams | None = None) -> None:
+    def save(self, password: str, data: VaultModel, kdf: KDFParams | None = None) -> None:
         if kdf is None and self.exists():
             try:
                 meta = self._read_meta()
@@ -198,15 +182,13 @@ class VaultManager:
                 kdf = KDFParams()
         self._write_encrypted(password, data, kdf)
 
-    def _write_encrypted(self, password: str, data: dict[str, Any], kdf: KDFParams | None = None) -> None:
+    def _write_encrypted(self, password: str, data: VaultModel, kdf: KDFParams | None = None) -> None:
         _validate_password(password)
         kdf = kdf or KDFParams()
 
-        plaintext = _serialize_data(_validate_plaintext_data(data))
+        plaintext = data.model_dump_json().encode("utf-8")
         if len(plaintext) > MAX_PLAINTEXT_SIZE:
-            raise VaultError(
-                f"Data too large: {len(plaintext)} bytes (max {MAX_PLAINTEXT_SIZE})"
-            )
+            raise VaultError(f"Data too large: {len(plaintext)} bytes (max {MAX_PLAINTEXT_SIZE})")
 
         if STRICT_CHECK:
             self._check_parent_permissions()
@@ -290,15 +272,14 @@ class VaultManager:
 
     def _atomic_write(self, meta: dict[str, Any]) -> None:
         temp = self._path.with_suffix(".tmp")
-        temp.write_text(json.dumps(meta, indent=2), encoding="utf-8")
-        os.chmod(temp, 0o600)
-
         try:
+            temp.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+            os.chmod(temp, 0o600)
             temp.replace(self._path)
-        finally:
+            os.chmod(self._path, 0o600)
+        except Exception:
             temp.unlink(missing_ok=True)
-
-        os.chmod(self._path, 0o600)
+            raise
 
     def _check_file_permissions(self) -> None:
         if not self._path.exists():
@@ -322,35 +303,72 @@ class VaultManager:
         if dir_mode & 0o077:
             raise VaultError(f"Vault directory permissions are too permissive: {oct(dir_mode)}")
 
+class TokenModel(BaseModel):
+    token: str
+    login_at: datetime
+    last_visit_at: datetime
+    username: str
 
-def main() -> int:
-    vault = VaultManager()
+class VaultModel(BaseModel):
+    tokens: List[TokenModel] = []
 
-    if not vault.exists():
-        password = getpass.getpass("Придумайте пароль: ")
-        repeat = getpass.getpass("Повторите пароль: ")
+class ClientVault:
+    def __init__(self) -> None:
+        self.vault = VaultManager(Path(".tokens"))
+        self.tokens: List[TokenModel] = []
+        self._password = ""
+
+    async def init(self):
+        if not self.vault.exists():
+            self._password = await ask_new_pw()
+            initial_data = VaultModel()
+            self.vault.create(self._password, initial_data, KDFParams())
+            self.tokens = initial_data.tokens
+            return
+
+        while True:
+            password = await pw_ask("Введите пароль -> ")
+            if not password:
+                bye()
+
+            try:
+                data = self.vault.open(password)
+                self._password = password
+                self.tokens = data.tokens
+                return
+            except InvalidPasswordError as err:
+                print(err)
+            
+    def save(self) -> None:
+        self.vault.save(self._password, VaultModel(tokens=self.tokens))
+
+async def pw_ask(prompt: str) -> str:
+    try:
+        result = await questionary.password(prompt).ask_async()
+        if not result:
+            bye()
+        return result
+    except EOFError:
+        bye()
+
+async def ask_new_pw() -> str:
+    while True:
+        password = await pw_ask("Придумайте пароль -> ")
+        repeat = await pw_ask("Повторите пароль -> ")
         if password != repeat:
             print("Пароли не совпадают")
-            return 1
+            continue
+        return password
 
-        vault.create(password, {"users": ["q"], "settings": {}}, KDFParams(memory_cost=DEFAULT_MEMORY_COST, time_cost=DEFAULT_TIME_COST, parallelism=DEFAULT_PARALLELISM))
-        print("Хранилище успешно создано.")
-    else:
-        password = getpass.getpass("Введите пароль: ")
-        try:
-            data = vault.open(password)
-            print("Пароль верный, хранилище расшифровано.")
-            print(data)
-            data["users"].append("new_user")
-            data["settings"]["theme"] = "dark"
-            vault.save(password, data)
-            print("Хранилище успешно обновлено.")
-        except InvalidPasswordError as exc:
-            print(exc)
-            return 1
-        except VaultError as exc:
-            print(f"Ошибка хранилища: {exc}")
-            return 1
+def main() -> int:
+    vault = ClientVault()
+
+    for i in vault.tokens:
+        print(i.token, i.login_at)
+
+    new = TokenModel(token="token", login_at=datetime.now(), last_visit_at=datetime.now(), username="user")
+    vault.tokens.append(new)
+    vault.save()
 
     return 0
 

@@ -1,26 +1,28 @@
 import asyncio
+import datetime
 
 from classes import Attach, AttachType, ConfigContainer, FileAttach, Message, UserProfile, Chat, ServerData, VideoAttach
 import payloads as pl
-from typing import Any, Dict, List
+from typing import Any, Dict, List, NoReturn
 from operator import itemgetter
 from loguru import logger
 import sys
 from network import NetworkMixin, ServerError, WrongPhoneError
 import captcha
 from tools import RussianPhoneValidator, any_without, read_number, ask, sel
-from crypt import VaultManager
+from crypt import ClientVault, InvalidPasswordError, TokenModel
 from pathlib import Path
-from settings import stg
+from logserver import LOGS_PORT
 import socket
+from datetime import datetime
 
 import questionary
 from prompt_toolkit.patch_stdout import patch_stdout
 
 
-def bye():
+def bye() -> NoReturn:
     print("bye")
-    exit(0)
+    sys.exit(0)
 
 class Client(NetworkMixin):
     profile: UserProfile
@@ -42,12 +44,6 @@ class Client(NetworkMixin):
         self.chats_by_id = {i.id: i for i in self.chats}
         self.config = data.config
 
-
-    async def disconnect(self):
-        if self.connection:
-            await self.connection.close()
-            print(f"Connection to {pl.URL} closed")
-
     def info(self):
         print("You:")
         self.profile.info(1)
@@ -55,7 +51,6 @@ class Client(NetworkMixin):
         [i.info(1) for i in self.contacts]
         print("Chats:")
         [i.info(1) for i in self.chats]
-        # open("src/w2.json", "w").write(json.dumps(await self._recv(), cls=UniversalEncoder, indent=2)
 
     async def update_missing_users(self, user_ids: List[int]) -> None:
         missing_ids = list(set(user_ids) - self.users_by_id.keys())
@@ -143,53 +138,96 @@ class Tuiclient(Client):
         )
         try:
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            client_socket.connect(('localhost', stg.LOGS_PORT))
-            print(f"Connected to logserver(port {stg.LOGS_PORT})")
+            client_socket.connect(('localhost', LOGS_PORT))
+            print(f"Connected to logserver(port {LOGS_PORT})")
             logger.add(lambda msg: client_socket.sendall(msg.encode('utf-16')), format="{message}", level="INFO")
-            # client_socket.close()
         except ConnectionRefusedError:
-            print(f"Logserver not running(port {stg.LOGS_PORT}). Logging here")
+            print(f"Logserver not running(port {LOGS_PORT}). Logging here")
             logger.add(sys.stdout, colorize=True, format="<green>{time:HH:mm:ss}</green> | {level} | {message}")
 
-    async def connect(self):
-        await self._netw_connect()
-        match await sel(["Use config token", "Enter token", "Auth by number"]):
-            case 0:
-                self.token = stg.ONEME_AUTH["token"]
-            case 1:
-                self.token = await ask("token ->")
-            case 2:
-                phone_number = await ask("phone number ->", validator=RussianPhoneValidator())
-                captcha_url = await self.get_captcha_url(phone_number)
-                while True:
-                    try:
-                        captcha_token = await captcha.solve(captcha_url)
-                        await self.disconnect()
-                        await self._netw_connect()
-                        auth_token = await self.send_verify_code(phone_number, captcha_token)
-                        break
-                    except WrongPhoneError as err:
-                        print(err)
-                        phone_number = await ask("phone number ->", validator=RussianPhoneValidator())
-                    except ServerError as err:
-                        print(err)
-                        bye()
+    DATE_FMT = "%Y-%m-%d %H:%M:%S"
 
-                while True:
-                    try:
-                        verify_code = await ask("verify code ->")
-                        self.token = await self.check_verify_code(auth_token, verify_code)
-                        break
-                    except ServerError as err:
-                        print(err)
-                print(self.token)
-            case _:
+    def _format_token_variant(self, token) -> str:
+        last = token.last_visit_at.strftime(self.DATE_FMT)
+        login = token.login_at.strftime(self.DATE_FMT)
+        return f"{token.username} [last: {last} logged in: {login}]"
+
+    async def _auth_by_phone(self) -> str:
+        phone_number = await ask("phone number ->", validator=RussianPhoneValidator())
+
+        while True:
+            captcha_url = await self.get_captcha_url(phone_number)
+            try:
+                captcha_token = await captcha.solve(captcha_url)
+                await self.disconnect()
+                await self._netw_connect()
+                auth_token = await self.send_verify_code(phone_number, captcha_token)
+                break
+            except WrongPhoneError as err:
+                print(err)
+                phone_number = await ask("phone number ->", validator=RussianPhoneValidator())
+            except ServerError as err:
+                print(err)
                 bye()
-        try:
-            await self.finalise_auth()
-        except ServerError as err:
-            print(err)
-            bye()
+
+        while True:
+            try:
+                verify_code = await ask("verify code ->")
+                return await self.check_verify_code(auth_token, verify_code)
+            except ServerError as err:
+                print(err)
+
+    async def select_account(self) -> None:
+        await self.disconnect()
+        await self._netw_connect()
+
+        if self._token_idx is not None:
+            self.vault.tokens[self._token_idx].last_visit_at = datetime.now()
+            self.vault.save()
+        self._token_idx = None
+
+        while True:
+            tokens = self.vault.tokens
+            options = [*map(self._format_token_variant, tokens), "Enter token", "Auth by number"]
+            
+            selection_idx = await sel(options)
+            if selection_idx is None:
+                bye()
+
+            is_existing_token = selection_idx < len(tokens)
+            if is_existing_token:
+                self.token = tokens[selection_idx].token
+            elif options[selection_idx] == "Enter token":
+                self.token = await ask("token ->")
+            elif options[selection_idx] == "Auth by number":
+                self.token = await self._auth_by_phone()
+
+            try:
+                await self.finalise_auth()
+                if not is_existing_token:
+                    selected = await questionary.confirm("Save this token?", default=True, auto_enter=True).ask_async()
+                    if selected is None:
+                        bye()
+                    if selected:
+                        new_token = TokenModel(token=self.token, login_at=datetime.now(), last_visit_at=datetime.now(), username=self.profile.get_name())
+                        self.vault.tokens.append(new_token)
+                        self._token_idx = len(self.vault.tokens) - 1
+                else:
+                    self._token_idx = selection_idx
+                    self.vault.tokens[selection_idx].last_visit_at = datetime.now()
+
+                self.vault.save()
+                return
+
+            except ServerError as err:
+                print(err)
+                if is_existing_token:
+                    selected = await questionary.confirm("Remove this token?", default=False, auto_enter=False).ask_async()
+                    if selected is None:
+                        bye()
+                    if selected:
+                        del self.vault.tokens[selection_idx]
+                        self.vault.save()
 
     async def chats_list(self):
         print("Chats:")
@@ -238,11 +276,15 @@ class Tuiclient(Client):
                             await self.message_info(message, chat_id)
 
     async def begin(self):
-        self.vault = VaultManager(Path(".tokens"))
+        self.vault = ClientVault()
+        await self.vault.init()
         await self._init_log()
-        await self.connect()
+
+        self._token_idx = None
+        await self.select_account()
         while True:
-            match await sel(["Profile info", "Contacts", "Chats list", "Limits and config", "User infos", "Logout", "Exit"], "Main menu"):
+            print(f"[{self.profile.id}] {self.profile.get_name()}")
+            match await sel(["Profile info", "Contacts", "Chats list", "Limits and config", "User infos", "Swap account", "Logout", "Exit"], "Main menu"):
                 case 0:
                     self.profile.info()
                 case 1:
@@ -285,10 +327,22 @@ class Tuiclient(Client):
                         case _:
                             bye()
                 case 5:
-                    await self.logout()
-                    print("logged out")
+                    await self.select_account()
+                case 6:
+                    if await questionary.confirm(f"Log out from {self.profile.get_name()}?", default=False, auto_enter=False).ask_async():
+                        await self.logout()
+                        print("logged out")
+                        bye()
                 case _:
                     bye()
+
+    async def disconnect(self):
+        if self.connection:
+            await self.connection.close()
+            print(f"Connection to {pl.URL} closed")
+        if self._token_idx is not None:
+            self.vault.tokens[self._token_idx].last_visit_at = datetime.now()
+            self.vault.save()
 
 async def main():
     with patch_stdout(raw=True):

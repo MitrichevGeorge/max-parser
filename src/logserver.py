@@ -1,14 +1,9 @@
 import socket
 import sys
 from loguru import logger
-from settings import stg
 
-logger.remove()
-logger.add(
-    sys.stdout, 
-    colorize=True, 
-    format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | {message}"
-)
+LOGS_PORT = 23522
+
 
 def handle_client(conn: socket.socket) -> None:
     with conn.makefile("r", encoding="utf-16", errors="replace") as client_file:
@@ -18,16 +13,22 @@ def handle_client(conn: socket.socket) -> None:
                 logger.info(clean_line)
 
 def start_server() -> None:
+    logger.remove()
+    logger.add(
+        sys.stdout, 
+        colorize=True, 
+        format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | {message}"
+    )
+
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     
     host = "127.0.0.1"
-    port = stg.LOGS_PORT
 
     try:
-        server.bind((host, port))
+        server.bind((host, LOGS_PORT))
         server.listen(1)
-        logger.warning(f"server started on {host}:{port}")
+        logger.warning(f"server started on {host}:{LOGS_PORT}")
 
         while True:
             logger.info("waiting for connection...")
