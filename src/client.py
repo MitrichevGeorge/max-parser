@@ -1,7 +1,14 @@
 import asyncio
 import datetime
 
-from classes import Attach, AttachType, ConfigContainer, FileAttach, Message, UserProfile, Chat, ServerData, VideoAttach
+try:
+    loop = asyncio.get_running_loop()
+except RuntimeError:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+
+from classes import Attach, AttachType, ConfigContainer, FileAttach, IncomingCall, Message, UserProfile, Chat, ServerData, VideoAttach, NewMsgEvent
 import payloads as pl
 from typing import Any, Dict, List, NoReturn
 from operator import itemgetter
@@ -56,6 +63,10 @@ class Client(NetworkMixin):
         new_infos = await self.get_infos(missing_ids)
         self.users_by_id.update({user.id: user for user in new_infos})
 
+    async def userid_profile(self, user_id: int) -> UserProfile:
+        await self.update_missing_users([user_id])
+        return self.users_by_id[user_id]
+
     async def norm_chatlist(self, new_type: bool = False) -> list[str | tuple[int, str, int]]:
         chat_to_user = {
             chat.id: any_without(chat.participants, self.profile.id)
@@ -92,7 +103,7 @@ class Client(NetworkMixin):
             return str(await self.get_video_urls(attach.videoId, attach.token, chatId, messageId))
         return ""
 
-    async def message_info(self, message: Message, chatId: int, tab: int = 0):
+    async def message_info(self, message: Message, chatId: int, tab: int = 0, ask: bool = True):
         await self.update_missing_users([message.sender])
         indent = "│" * tab
         child_indent = "│" * (tab + 1)
@@ -103,6 +114,10 @@ class Client(NetworkMixin):
         print(f'{child_indent}Attaches: { [' '.join((i.info(), await self.get_attach_info(i, chatId, message.id))) for i in message.attaches] }')
         print(f'{child_indent}ReactionInfo: {message.reactionInfo}')
         print(f'{indent}└{"─"*6}')
+        if ask:
+            selected = await questionary.confirm("Mark as read?", default=False, auto_enter=True).ask_async()
+            if selected:
+                await self.mark_as_read(chatId, message.id)
 
     async def norm_chat(self, chat_id: int) -> list[tuple[int, str, int]]:
         chat = self.chats_by_id[chat_id]
@@ -140,6 +155,15 @@ class Tuiclient(Client):
         except ConnectionRefusedError:
             print(f"Logserver not running(port {LOGS_PORT}). Logging here")
             logger.add(sys.stdout, colorize=True, format="<green>{time:HH:mm:ss}</green> | {level} | {message}")
+
+    async def _handle_event(self, event: NewMsgEvent):
+        print("New message:")
+        await self.message_info(event.message, event.chatId, tab=1, ask=False)
+
+    async def _handle_call(self, call: IncomingCall):
+        print("Incoming call:")
+        print(f"User: {(await self.userid_profile(call.callerId)).get_name()} type: {call.type}")
+        print(f"Conv id: {call.conversationId} vcp: {call.vcp}")
 
     DATE_FMT = "%Y-%m-%d %H:%M:%S"
 
@@ -230,43 +254,54 @@ class Tuiclient(Client):
             chat_id = norm_chatlist[select][2]
             if not isinstance(chat_id, int):
                 raise ValueError
-            self.chats_by_id[chat_id].info()
+            chat = self.chats_by_id[chat_id]
+            chat.info()
             norm_chat = await self.norm_chat(chat_id)
             
             while True:
-                select = await sel(list(map(itemgetter(1), norm_chat))+["Send message", "Back", "Main menu", "Delete chat"], "Messages")
-                match select - len(norm_chat):
-                    case 0:
-                        text: str = await ask()
-                        message = await self.send_message(chat_id, text)
-                        msg_list = self.chats_by_id[chat_id].messages
-                        if msg_list:
-                            msg_list.append(message)
-                        else:
-                            print("Message list is none")
-                    case 1:
-                        break
-                    case 2:
-                        return
-                    case 3:
-                        for_all = await questionary.confirm(f"Delete for all?", default=False, auto_enter=True).ask_async()
-                        try:
-                            await self.delete_chat(chat_id, for_all)
-                        except ServerError as err:
-                            print(err)
-                    case _:
-                        msg_id = norm_chat[select][2]
-                        msg_by_id = self.chats_by_id[chat_id].messages_by_id
-                        if msg_by_id:
-                            message = msg_by_id[msg_id]
-                            await self.message_info(message, chat_id)
+                options = list(map(itemgetter(1), norm_chat)) + ["Send message", "Call", "Back", "Main menu", "Delete chat"]
+                select = await sel(options, "Messages")
+
+                if select < len(norm_chat):
+                    msg_id = norm_chat[select][2]
+                    msg_by_id = chat.messages_by_id
+                    if msg_by_id:
+                        message = msg_by_id[msg_id]
+                        await self.message_info(message, chat_id)
+                elif options[select] == "Send message":
+                    text: str = await ask()
+                    message = await self.send_message(chat_id, text)
+                    msg_list = chat.messages
+                    if msg_list:
+                        msg_list.append(message)
+                    else:
+                        print("Message list is none")
+                elif options[select] == "Call":
+                    print(chat.videoConversation, chat.participants)
+                    if not chat.participants:
+                        raise RuntimeError
+                    call = await self.begin_call([any_without(chat.participants, self.profile.id)])
+                    print(f'Кароч, к webrtc надо подрубаться: {call.model_dump_json()}')
+                elif options[select] == "Back":
+                    break
+                elif options[select] == "Main menu":
+                    return
+                elif options[select] == "Delete chat":
+                    for_all = await questionary.confirm(f"Delete for all?", default=False, auto_enter=True).ask_async()
+                    try:
+                        await self.delete_chat(chat_id, for_all)
+                    except ServerError as err:
+                        print(err)
 
     async def begin(self):
+        self._token_idx = None
+        self.on_new_message.connect(self._handle_event)
+        self.on_in_call.connect(self._handle_call)
         self.vault = ClientVault()
         await self.vault.init()
         await self._init_log()
 
-        self._token_idx = None
+    async def main_menu(self):
         await self.select_account()
         while True:
             print(f"[{self.profile.id}] {self.profile.get_name()}")
@@ -334,8 +369,9 @@ class Tuiclient(Client):
 async def main():
     with patch_stdout(raw=True):
         q = Tuiclient()
+        await q.begin()
         try:
-            await q.begin()
+            await q.main_menu()
         finally:
             await q.disconnect()
 

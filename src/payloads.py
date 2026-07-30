@@ -1,3 +1,5 @@
+import json
+
 URL = "wss://api.oneme.ru/websocket"
 HEADERS = {
     "Host": "ws-api.oneme.ru",
@@ -47,3 +49,14 @@ def get_auth_payload(token: str, chats_count: int = 60) -> dict:
         "presenceSync": -1,
         "draftsSync": 0
     }
+
+def get_call_payload(device_id: str) -> str:
+    return json.dumps({
+        "deviceId": device_id,
+        "sdkVersion": "2.8.11-beta.7",
+        "clientAppKey": "CNHIJPLGDIHBABABA",
+        "platform": "WEB",
+        "protocolVersion": 5,
+        "domainId": "",
+        "capabilities": "2A03F"
+    })

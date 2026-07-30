@@ -11,7 +11,7 @@ pip install -r requirements.txt
 **Через devtools:**
 Откройте `web.max.ru`, войдите в свой аккаунт, откройте devTools->`Storage`->`Local Storage`:
 ![img](img/img1.png)
-Скопируйте значение `__oneme_auth` и запишите его в `.env` как `ONEME_AUTH` в одиночных кавыках, скопируйте `__oneme_device_id` и запишите как `ONEME_DEVICE_ID` можно без кавычек.
+Найдите значение `__oneme_auth` и скопируйте строку соответствующую параметру `token`.
 
 **Автоматически:**
 Чтоб вообще не париться можете запустить это в `tampermonkey`:
@@ -22,7 +22,7 @@ pip install -r requirements.txt
 // @version      1.0
 // @description  Копирует в буффер обмена данные сессии max
 // @author       MitrichevGeorge
-// @match        https://web.max.ru/
+// @match        https://web.max.ru/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=max.ru
 // @grant        GM_registerMenuCommand
 // @grant        GM_setClipboard
@@ -35,25 +35,27 @@ pip install -r requirements.txt
 
     function myCustomAction() {
         const __oneme_auth = localStorage.getItem('__oneme_auth');
-        const __oneme_device_id = localStorage.getItem('__oneme_device_id');
 
-        if (!__oneme_auth || !__oneme_device_id) {
+        if (!__oneme_auth) {
             alert('Данные не найдены');
         } else {
-            const dataToCopy = `ONEME_DEVICE_ID=${__oneme_device_id}\nONEME_AUTH='${__oneme_auth}'`
+            const dataToCopy = JSON.parse(__oneme_auth).token;
             try {
                 GM_setClipboard(dataToCopy, "text");
-                alert('Данные успешно скопированы');
+                alert('Токен сессии успешно скопирован');
             } catch (err) {
                 alert(`Ошибка при копировании: ${err}`);
             }
         }
     }
 
-    GM_registerMenuCommand("Скопировать значения для .env", myCustomAction);
+    GM_registerMenuCommand("Скопировать токен сессии", myCustomAction);
 
 })();
 ```
+
+**Полностью автоматически**
+Теперь имеется ещё вход по номеру. Но вам потребуется пройти капчу в браузере
 
 ### Disclaimer and Terms of Use
 

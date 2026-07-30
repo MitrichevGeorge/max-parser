@@ -57,6 +57,18 @@ def parse_packet(buf):
 
 def main():
     while True:
-        print(parse_packet(base64.b64decode(input("\nB64: "))))
+        try:
+            b64 = input("B64 -> ").strip()
+            if not b64:
+                continue
+            
+            print(parse_packet(base64.b64decode(b64)))
+        except (KeyboardInterrupt, EOFError):
+            print("\nbye")
+            break
+        except Exception as err:
+            print(f"Error: {type(err).__name__} - {err}")
+
+        
 
 if __name__ == "__main__": main()

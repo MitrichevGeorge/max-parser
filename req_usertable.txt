@@ -6,11 +6,6 @@ loguru
 prompt_toolkit
 questionary
 
-aiohttp
-uvicorn
-fastapi
-httpx
-
-cryptography
-argon2-cffi
-eventkit
+rich
+openpyxl
+pandas

@@ -1,6 +1,6 @@
 from typing import List, Dict, Any, Literal, Annotated, Union
 from enum import StrEnum
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, Json, field_validator
 from tools import OnOffBool, MSKTimestamp, format_bytes, format_duration
 
 class NameInfo(BaseModel):
@@ -208,6 +208,8 @@ class AttachType(StrEnum):
 class HangupTypes(StrEnum):
     REJECTED = "REJECTED"
     HUNGUP = "HUNGUP"
+    CANCELED = "CANCELED"
+    MISSED = "MISSED"
 
 class CallTypes(StrEnum):
     AUDIO = "AUDIO"
@@ -301,6 +303,8 @@ Attach = Annotated[
     Field(discriminator='type')
 ]
 
+
+
 class MessageLinkTypes(StrEnum):
     FORWARD = "FORWARD"
     REPLY = "REPLY"
@@ -313,6 +317,7 @@ class MessageLink(BaseModel):
 class Message(BaseModel):
     id: int
     time: MSKTimestamp
+    type: str | None = None
     sender: int
     text: str
     attaches: List[Attach]
@@ -327,3 +332,49 @@ class VideoUrls(BaseModel):
 
     def __str__(self):
         return self.mp4_1080 or self.mp4_720 or ""
+
+class NewMsgEvent(BaseModel):
+    chatId: int
+    message: Message
+    prevMessageId: int
+    unread: int
+    mark: int
+
+
+class IncomingCall(BaseModel):
+    callerId: int
+    chatId: int
+    conversationId: str
+    type: CallTypes
+    vcp: str
+    isContact: bool
+
+
+class CallIdInfo(BaseModel):
+    internal: Any
+    external: str
+
+class CallTurnConfig(BaseModel):
+    urls: list[str]
+    username: str
+    credential: str
+
+class CallStunConfig(BaseModel):
+    urls: list[str]
+
+class CallInternalParams(BaseModel):
+    id: CallIdInfo
+    isConcurrent: bool
+    endpoint: str
+    wsIpAddresses: list[str]
+    wtEndpoint: str
+    wtIpAddresses: list[str]
+    clientType: str
+    turn: CallTurnConfig
+    stun: CallStunConfig
+    deviceIdx: int
+
+class BeginCallResp(BaseModel):
+    conversationId: str
+    internalCallerParams: Json[CallInternalParams]
+    rejectedParticipants: List[int]
