@@ -1,0 +1,14 @@
+{
+  "accounts": [
+    {
+      "token": "An_Sx6HQ9HDinmqXMUoQIDYytYW9VQJ0MwkJJ_jpd2yfbXQJlohEY6OMzf3ZOid2qBZiTKJ9_TEyIUKPP3FZw3d1V5eZWD-DzfoKHNUoZ6gMgqSQ8iyJg88bloUp_l7W-uC7Y26zBgjsUDQvO_ZJT6d5fyhmZ7YY75EN5d1BrGggpWBfQDQqgkxNJiSeRxjRZiEah_N17MWpSZJr9MQxIpHga9d0oCf2-ei2adpMDwwLejxnhT9iNN4YAmz0sWWV9WJ9tZERTmR50SC_uoqic1O4uHuZEX_h6eBJe9TeGBsq6ArX1ZVfs4TeW1wMaFIDkn-kznSFUpJCP8qVMDzTCeV6x94BfKEfg4nkK5sdbkDMYX9gCt_E8BFjIwZQPIPEo9I09T5fQnPRKoUo7d-1pvZCGRqnwBpEzLPXYO6tGgRZ4sSWVa5KOdGQxW6NQXJoVLKcZBI0u_EL-yJ55VPUeB4NMoVUjDpqs62vK8ILWZldNQBkdeCyY94ij04enpY3ClAM0ktKp7dxzpZbBsdPujRxluRWpvEAlFouw55lW_gUP2HBCUVthTWRnIUjibN7EeivIFpiwWTiHyMSXUa8oNFWIAclgjqH7Y7uz03ztS7XaoRH360R2nNWIIGvUV1cBvhrY8P535B4XF1ksJBd0MJDhVYujN2rQeUDP75mnsMxMwJlIP4U9oy9e9Ea1e6vy-9kDSo",
+      "username": "saya",
+      "user_id": 369480806,
+      "valid": true,
+      "error": null
+    }
+  ],
+  "cooldown_seconds": 20.0,
+  "reconnect_cooldown_seconds": 20.0,
+  "batches_per_account": 5
+}

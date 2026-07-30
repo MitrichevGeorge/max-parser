@@ -1501,6 +1501,7 @@ _DASHBOARD_HTML = """
 
         ws.onopen = () => {
             console.log('[Dashboard] WebSocket connected');
+            restorePhoneAuthState();
         };
 
         ws.onerror = (err) => {
@@ -1701,12 +1702,13 @@ _DASHBOARD_HTML = """
 
         function openPhoneModal() {
             document.getElementById('phone-modal')?.classList.remove('hidden');
-            document.getElementById('phone-step-1')?.classList.remove('hidden');
-            document.getElementById('phone-step-2')?.classList.add('hidden');
-            document.getElementById('phone-step-3')?.classList.add('hidden');
-            document.getElementById('phone-error')?.classList.add('hidden');
-            document.getElementById('captcha-frame')?.removeAttribute('src');
             lucide.createIcons();
+        }
+
+        function showPhoneStep(step) {
+            document.getElementById('phone-step-1')?.classList.toggle('hidden', step !== 1);
+            document.getElementById('phone-step-2')?.classList.toggle('hidden', step !== 2);
+            document.getElementById('phone-step-3')?.classList.toggle('hidden', step !== 3);
         }
 
         function closePhoneModal() {
@@ -1740,8 +1742,7 @@ _DASHBOARD_HTML = """
                     if (btnText) btnText.textContent = 'Получить код';
                     return;
                 }
-                document.getElementById('phone-step-1')?.classList.add('hidden');
-                document.getElementById('phone-step-2')?.classList.remove('hidden');
+                showPhoneStep(2);
                 const frame = document.getElementById('captcha-frame');
                 if (frame && data.solver_url) frame.src = data.solver_url;
                 phonePollTimer = setInterval(pollPhoneStatus, 1000);
@@ -1759,12 +1760,33 @@ _DASHBOARD_HTML = """
                 if (data.stage === 'code') {
                     clearInterval(phonePollTimer);
                     phonePollTimer = null;
-                    document.getElementById('phone-step-2')?.classList.add('hidden');
-                    document.getElementById('phone-step-3')?.classList.remove('hidden');
+                    showPhoneStep(3);
                 } else if (data.stage === 'error') {
                     clearInterval(phonePollTimer);
                     phonePollTimer = null;
                     showPhoneError(data.error || 'Ошибка авторизации');
+                }
+            } catch {}
+        }
+
+        async function restorePhoneAuthState() {
+            try {
+                const res = await fetch('/api/auth/phone/status');
+                const data = await res.json();
+                if (data.stage === 'idle' || data.stage === 'error') return;
+                openPhoneModal();
+                document.getElementById('phone-error')?.classList.add('hidden');
+                if (data.phone) {
+                    const phoneInput = document.getElementById('phone-input');
+                    if (phoneInput) phoneInput.value = data.phone;
+                }
+                if (data.stage === 'captcha') {
+                    showPhoneStep(2);
+                    const frame = document.getElementById('captcha-frame');
+                    if (frame && data.solver_url) frame.src = data.solver_url;
+                    if (!phonePollTimer) phonePollTimer = setInterval(pollPhoneStatus, 1000);
+                } else if (data.stage === 'code') {
+                    showPhoneStep(3);
                 }
             } catch {}
         }
@@ -2176,6 +2198,7 @@ async def _handle_phone_init(request: web.Request) -> web.Response:
             "stage": "captcha",
             "auth_token": None,
             "error": None,
+            "solver_url": solver_url,
             "future": account_manager._captcha_token_future,
         }
         account_manager.set_pending_phone_auth(pending)
@@ -2197,6 +2220,8 @@ async def _handle_phone_status(request: web.Request) -> web.Response:
         "stage": pending.get("stage"),
         "phone": pending.get("phone"),
         "error": pending.get("error"),
+        "solver_url": pending.get("solver_url"),
+        "auth_token": bool(pending.get("auth_token")),
     })
 
 
