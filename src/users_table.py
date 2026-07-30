@@ -4,12 +4,14 @@ import asyncio
 import datetime
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
 
 import openpyxl
+import uvicorn
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
@@ -19,6 +21,8 @@ from aiohttp import web
 import aiohttp
 from classes import UserProfile
 from client import Tuiclient
+
+import captcha
 
 
 logging.basicConfig(
@@ -40,11 +44,14 @@ class ScrapingState:
 
     cooldown_seconds: float = 10.0
     reconnect_cooldown_seconds: float = 20.0
+    batches_per_account: int = 5
     start_time: float = field(default_factory=time.time)
     last_batch_time: float = field(default_factory=time.time)
     avg_batch_duration: float = 0.0
     batch_count: int = 0
     last_broadcasted_batch_idx: int = 0
+    current_account_index: int = -1
+    current_account_username: Optional[str] = None
 
     current_action: str = "idle"
     action_started_at: float = field(default_factory=time.time)
@@ -71,6 +78,7 @@ class ScrapingState:
     last_batch_user_count: int = 0
 
     _save_path: Optional[str] = field(default=None, repr=False)
+    account_manager: Optional[Any] = field(default=None, repr=False)
 
     ws_clients: Set[web.WebSocketResponse] = field(default_factory=set)
 
@@ -191,6 +199,10 @@ class ScrapingState:
             "action_detail": self.action_detail,
             "action_label": self._action_label(),
             "action_color": self._action_color(),
+            "accounts": self.account_manager.to_dict() if self.account_manager else [],
+            "batches_per_account": self.batches_per_account,
+            "current_account_index": self.current_account_index,
+            "current_account_username": self.current_account_username,
         }
 
     def _action_label(self) -> str:
@@ -214,6 +226,184 @@ class ScrapingState:
             "reinit": "#f85149",
         }
         return colors.get(self.current_action, "#8b949e")
+
+
+def _mask_token(token: str) -> str:
+    if len(token) <= 12:
+        return token
+    return f"{token[:8]}***{token[-4:]}"
+
+
+@dataclass
+class Account:
+    token: str
+    username: Optional[str] = None
+    user_id: Optional[int] = None
+    valid: bool = False
+    error: Optional[str] = None
+    profile: Optional[UserProfile] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "token_prefix": _mask_token(self.token),
+            "username": self.username or "—",
+            "user_id": self.user_id,
+            "valid": self.valid,
+            "error": self.error,
+        }
+
+
+class AccountManager:
+    """Stores, validates and rotates scraping accounts."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.accounts: List[Account] = []
+        self._lock = asyncio.Lock()
+        self._pending_phone_auth: Optional[Dict[str, Any]] = None
+        self._captcha_server: Optional[uvicorn.Server] = None
+        self._captcha_server_task: Optional[asyncio.Task] = None
+        self._captcha_token_future: Optional[asyncio.Future] = None
+        self.loaded_settings: Dict[str, Any] = {}
+        self.load()
+
+    def load(self) -> None:
+        if not self.path.exists():
+            return
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            self.accounts = [
+                Account(
+                    token=a.get("token", ""),
+                    username=a.get("username"),
+                    user_id=a.get("user_id"),
+                    valid=bool(a.get("valid", False)),
+                    error=a.get("error"),
+                )
+                for a in data.get("accounts", [])
+            ]
+            self.loaded_settings = {
+                key: data[key]
+                for key in ("cooldown_seconds", "reconnect_cooldown_seconds", "batches_per_account")
+                if key in data
+            }
+        except Exception as exc:
+            logger.warning("Failed to load accounts: %s", exc)
+
+    def save(self, state: ScrapingState) -> None:
+        data = {
+            "accounts": [
+                {
+                    "token": a.token,
+                    "username": a.username,
+                    "user_id": a.user_id,
+                    "valid": a.valid,
+                    "error": a.error,
+                }
+                for a in self.accounts
+            ],
+            "cooldown_seconds": state.cooldown_seconds,
+            "reconnect_cooldown_seconds": state.reconnect_cooldown_seconds,
+            "batches_per_account": state.batches_per_account,
+        }
+        try:
+            self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as exc:
+            logger.warning("Failed to save accounts: %s", exc)
+
+    def to_dict(self) -> List[Dict[str, Any]]:
+        return [a.to_dict() for a in self.accounts]
+
+    def valid_count(self) -> int:
+        return sum(1 for a in self.accounts if a.valid)
+
+    def next_valid_index(self, start: int) -> Optional[int]:
+        n = len(self.accounts)
+        if n == 0:
+            return None
+        for offset in range(1, n + 1):
+            idx = (start + offset) % n
+            if self.accounts[idx].valid:
+                return idx
+        return None
+
+    async def validate_token(self, token: str) -> Account:
+        cl = Tuiclient()
+        try:
+            await cl._netw_connect()
+            cl.token = token
+            await cl.finalise_auth()
+            profile = cl.profile
+            return Account(
+                token=token,
+                username=profile.get_name(),
+                user_id=profile.id,
+                valid=True,
+                profile=profile,
+            )
+        except Exception as exc:
+            logger.exception("Token validation failed")
+            return Account(token=token, valid=False, error=str(exc))
+        finally:
+            try:
+                await cl.disconnect()
+            except Exception:
+                pass
+
+    async def add_account(self, account: Account) -> Account:
+        async with self._lock:
+            for idx, existing in enumerate(self.accounts):
+                if existing.token == account.token:
+                    self.accounts[idx] = account
+                    break
+            else:
+                self.accounts.append(account)
+            return account
+
+    async def remove_account(self, idx: int) -> bool:
+        async with self._lock:
+            if 0 <= idx < len(self.accounts):
+                self.accounts.pop(idx)
+                return True
+            return False
+
+    async def start_captcha_solver(self, url: str) -> str:
+        captcha.state.captcha_url = url
+        captcha.state.token_future = asyncio.get_running_loop().create_future()
+        self._captcha_token_future = captcha.state.token_future
+        config = uvicorn.Config(
+            app=captcha.make_app(),
+            host="127.0.0.1",
+            port=18765,
+            log_level="critical",
+            access_log=False,
+        )
+        self._captcha_server = uvicorn.Server(config)
+        self._captcha_server_task = asyncio.create_task(self._captcha_server.serve())
+        return "http://127.0.0.1:18765/"
+
+    async def stop_captcha_solver(self) -> None:
+        if self._captcha_server and self._captcha_server_task and not self._captcha_server_task.done():
+            self._captcha_server.should_exit = True
+            self._captcha_server_task.cancel()
+            try:
+                await self._captcha_server_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        self._captcha_server = None
+        self._captcha_server_task = None
+        self._captcha_token_future = None
+        captcha.state.captcha_url = None
+        captcha.state.token_future = None
+
+    def get_pending_phone_auth(self) -> Optional[Dict[str, Any]]:
+        return self._pending_phone_auth
+
+    def set_pending_phone_auth(self, pending: Optional[Dict[str, Any]]) -> None:
+        self._pending_phone_auth = pending
+
+    async def cleanup(self) -> None:
+        await self.stop_captcha_solver()
 
 
 class ScraperManager:
@@ -366,7 +556,31 @@ async def _run_scraper_wrapper(state: ScrapingState) -> None:
         await _broadcast_state(state)
 
 
+async def _wait_while_running(
+    state: ScrapingState, duration: float, action: str, detail: str = ""
+) -> bool:
+    """Wait for `duration` seconds while running and not paused. Return False if stopped/paused."""
+    state.set_action(action, duration_estimate=duration, detail=detail)
+    start = time.time()
+    while time.time() - start < duration:
+        if not state.is_running:
+            return False
+        if state.is_paused:
+            state.set_action("idle")
+            return False
+        await asyncio.sleep(0.1)
+        await _broadcast_state(state)
+    return True
+
+
 async def _run_scraper(state: ScrapingState) -> None:
+    manager = state.account_manager
+    if manager is None or manager.valid_count() == 0:
+        state.last_error = "Нет доступных аккаунтов. Настройте аккаунты в панели."
+        state.is_running = False
+        await _broadcast_state(state)
+        return
+
     state.is_running = True
     state.start_time = time.time()
     state.current_id = state.id_min
@@ -384,9 +598,81 @@ async def _run_scraper(state: ScrapingState) -> None:
     state.reset_save_path()
     state.update_excel_path()
 
-    cl = Tuiclient()
-    await cl._init_log()
-    await cl.connect()
+    active_client: Optional[Tuiclient] = None
+    active_account_index = -1
+    batches_on_current = 0
+    init_log_done = False
+
+    async def close_active() -> None:
+        nonlocal active_client
+        if active_client is not None:
+            try:
+                await active_client.disconnect()
+            except Exception:
+                pass
+            active_client = None
+
+    def force_switch() -> None:
+        nonlocal batches_on_current
+        batches_on_current = state.batches_per_account
+
+    async def activate_next_account() -> bool:
+        nonlocal active_client, active_account_index, batches_on_current, init_log_done
+        await close_active()
+        if active_account_index != -1:
+            if not await _wait_while_running(
+                state, state.reconnect_cooldown_seconds, "reinit", "Переключение аккаунта"
+            ):
+                return False
+
+        next_idx = manager.next_valid_index(active_account_index)
+        if next_idx is None:
+            state.last_error = "Нет доступных аккаунтов для продолжения"
+            return False
+
+        active_account_index = next_idx
+        batches_on_current = 0
+        account = manager.accounts[next_idx]
+        state.current_account_index = next_idx
+        state.current_account_username = account.username
+        state.set_action(
+            "reinit",
+            duration_estimate=5.0,
+            detail=f"Вход: {account.username or account.user_id or 'аккаунт'}",
+        )
+        await _broadcast_state(state)
+
+        cl = Tuiclient()
+        if not init_log_done:
+            await cl._init_log()
+            init_log_done = True
+        try:
+            await cl._netw_connect()
+            cl.token = account.token
+            await cl.finalise_auth()
+            account.profile = cl.profile
+            account.user_id = cl.profile.id
+            account.username = cl.profile.get_name()
+            account.valid = True
+            account.error = None
+            active_client = cl
+            manager.save(state)
+            state.add_reinit_log(f"Аккаунт {account.username} ({account.user_id}) активен")
+            await _broadcast_state(state)
+            return True
+        except Exception as exc:
+            logger.exception("Account login failed")
+            account.valid = False
+            account.error = str(exc)
+            manager.save(state)
+            state.last_error = f"Ошибка входа в аккаунт {account.username or account.user_id}: {exc}"
+            state.add_reinit_log(f"Ошибка входа: {exc}")
+            try:
+                await cl.disconnect()
+            except Exception:
+                pass
+            await _broadcast_state(state)
+            return False
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -413,22 +699,20 @@ async def _run_scraper(state: ScrapingState) -> None:
                 await _broadcast_state(state)
                 continue
 
+            need_switch = active_client is None or batches_on_current >= state.batches_per_account
+            if need_switch:
+                ok = await activate_next_account()
+                if not ok or not state.is_running:
+                    break
+
             c_id_max = min(state.current_id + state.id_step, state.id_max)
             id_range = list(range(state.current_id, c_id_max))
             detail = f"IDs {state.current_id:,} — {c_id_max - 1:,}"
 
-            logger.info("Fetching %s", detail)
+            logger.info("Fetching %s with account %s", detail, state.current_account_username)
 
             iteration_start = time.time()
-            state.set_action("cooldown", duration_estimate=state.cooldown_seconds, detail=detail)
-            cooldown_start = time.time()
-            while time.time() - cooldown_start < state.cooldown_seconds:
-                if not state.is_running or state.is_paused:
-                    break
-                await asyncio.sleep(0.1)
-                await _broadcast_state(state)
-
-            if not state.is_running or state.is_paused:
+            if not await _wait_while_running(state, state.cooldown_seconds, "cooldown", detail):
                 continue
 
             state.set_action("request", duration_estimate=2.0, detail=detail)
@@ -437,29 +721,13 @@ async def _run_scraper(state: ScrapingState) -> None:
             batch_start = time.time()
             new_infos: List[UserProfile] = []
             try:
-                new_infos = await cl.get_infos(id_range)
-            except RuntimeError as exc:
-                logger.error("RuntimeError during fetch: %s", exc)
+                new_infos = await active_client.get_infos(id_range)
+            except Exception as exc:
+                logger.exception("Batch fetch failed")
                 state.last_error = str(exc)
-                state.add_reinit_log(f"RuntimeError: {exc}")
-
-                await cl.disconnect()
-                del cl
-                logger.info("Reinitializing client...")
-                state.add_reinit_log("Client reinitialized")
-
-                reinit_duration = state.reconnect_cooldown_seconds
-                state.set_action("reinit", duration_estimate=reinit_duration, detail="Подключение к API")
-                reinit_start = time.time()
-                while time.time() - reinit_start < reinit_duration:
-                    if not state.is_running:
-                        break
-                    await asyncio.sleep(0.1)
-                    await _broadcast_state(state)
-
-                cl = Tuiclient()
-                await cl._init_log()
-                await cl.connect()
+                state.add_reinit_log(f"Ошибка батча: {exc}")
+                await close_active()
+                force_switch()
                 continue
 
             batch_duration = time.time() - batch_start
@@ -468,6 +736,7 @@ async def _run_scraper(state: ScrapingState) -> None:
                 state.avg_batch_duration * (state.batch_count - 1) + batch_duration
             ) / state.batch_count
             state.last_batch_time = time.time()
+            batches_on_current += 1
 
             users_by_id = {user.id: user for user in new_infos}
 
@@ -529,7 +798,9 @@ async def _run_scraper(state: ScrapingState) -> None:
     finally:
         state.is_running = False
         state.set_action("idle")
-        await cl.disconnect()
+        await close_active()
+        state.current_account_index = -1
+        state.current_account_username = None
         await _broadcast_state(state)
 
 
@@ -704,6 +975,7 @@ _DASHBOARD_HTML = """
                     Остановлен
                 </span>
                 <p id="last-error" class="text-sm text-muted mt-2 truncate"></p>
+                <p id="current-account" class="text-sm text-muted mt-2 truncate">Текущий аккаунт: <span class="text-text">—</span></p>
             </div>
         </div>
 
@@ -726,6 +998,35 @@ _DASHBOARD_HTML = """
                 <div class="relative h-64 w-full">
                     <canvas id="users-chart"></canvas>
                 </div>
+            </div>
+        </div>
+
+        <div class="bg-card border border-border rounded-xl p-5 md:p-6 mb-5 card-hover" id="accounts-card">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="shield-user" class="w-5 h-5 text-accent"></i>
+                    <span class="text-sm font-medium uppercase tracking-wider text-muted">Аккаунты</span>
+                </div>
+                <span id="accounts-summary" class="text-xs text-muted">0 доступных</span>
+            </div>
+
+            <div id="accounts-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
+                <div class="text-muted italic text-sm">Аккаунты не настроены</div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                <div class="flex items-center gap-2">
+                    <input type="text" id="token-input" placeholder="Вставьте токен"
+                           class="flex-1 bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors">
+                    <button onclick="addToken()" class="btn-press flex items-center gap-2 bg-success hover:bg-success/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                        <i data-lucide="key" class="w-4 h-4"></i>
+                        Добавить токен
+                    </button>
+                </div>
+                <button onclick="openPhoneModal()" class="btn-press flex items-center justify-center gap-2 bg-accent hover:bg-accent/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                    <i data-lucide="smartphone" class="w-4 h-4"></i>
+                    Войти по номеру
+                </button>
             </div>
         </div>
 
@@ -779,6 +1080,21 @@ _DASHBOARD_HTML = """
                     <i data-lucide="check" class="w-4 h-4"></i>
                     Применить
                 </button>
+
+                <div class="flex items-center gap-2">
+                    <label class="text-sm text-muted">Батчей с аккаунта:</label>
+                    <input type="number" id="batches-per-account-input" value="5" min="1" step="1"
+                           class="w-24 bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors">
+                </div>
+                <button onclick="updateBatchesPerAccount()" class="btn-press flex items-center gap-2 bg-accent hover:bg-accent/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                    <i data-lucide="check" class="w-4 h-4"></i>
+                    Применить
+                </button>
+
+                <button onclick="startScraper()" id="start-btn" class="btn-press flex items-center gap-2 bg-accent hover:bg-accent/80 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                    <i data-lucide="play" class="w-4 h-4"></i>
+                    <span id="start-btn-text">Старт</span>
+                </button>
                 <button onclick="togglePause()" id="pause-btn" class="btn-press flex items-center gap-2 bg-border hover:bg-border/80 text-text px-4 py-2 rounded-lg text-sm font-medium transition-colors">
                     <i data-lucide="pause" class="w-4 h-4"></i>
                     <span>Пауза</span>
@@ -816,6 +1132,51 @@ _DASHBOARD_HTML = """
             <div id="log-container" class="max-h-72 overflow-y-auto font-mono text-xs space-y-1">
                 <div class="text-muted italic py-2">Лог пуст — пока нет реинитов</div>
             </div>
+        </div>
+    </div>
+
+    <div id="phone-modal" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closePhoneModal()"></div>
+        <div class="absolute inset-x-4 top-10 md:inset-x-auto md:left-1/2 md:-translate-x-1/2 md:w-[600px] max-h-[90vh] overflow-y-auto bg-card border border-border rounded-xl shadow-2xl p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold text-text">Вход по номеру телефона</h3>
+                <button onclick="closePhoneModal()" class="text-muted hover:text-text transition-colors">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <div id="phone-step-1" class="space-y-3">
+                <label class="block text-sm text-muted">Номер телефона</label>
+                <input type="tel" id="phone-input" placeholder="+79991234567"
+                       class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors">
+                <p class="text-xs text-muted">После нажатия кнопки откроется капча во фрейме. Решите её, чтобы получить SMS-код.</p>
+                <button onclick="initPhoneAuth()" id="phone-init-btn" class="btn-press w-full flex items-center justify-center gap-2 bg-accent hover:bg-accent/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                    <i data-lucide="send" class="w-4 h-4"></i>
+                    <span id="phone-init-btn-text">Получить код</span>
+                </button>
+            </div>
+
+            <div id="phone-step-2" class="hidden space-y-3">
+                <div class="flex items-center gap-2 text-sm text-warn">
+                    <span class="w-2 h-2 rounded-full bg-warn animate-pulse"></span>
+                    <span id="phone-status-text">Решите капчу во фрейме...</span>
+                </div>
+                <iframe id="captcha-frame" class="w-full h-[500px] rounded-lg border border-border bg-bg"></iframe>
+                <button onclick="cancelPhoneAuth()" class="btn-press w-full flex items-center justify-center gap-2 bg-danger hover:bg-danger/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                    Отмена
+                </button>
+            </div>
+
+            <div id="phone-step-3" class="hidden space-y-3">
+                <label class="block text-sm text-muted">Код из SMS</label>
+                <input type="text" id="phone-code-input" placeholder="1234"
+                       class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors">
+                <button onclick="verifyPhoneCode()" id="phone-verify-btn" class="btn-press w-full flex items-center justify-center gap-2 bg-success hover:bg-success/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                    <span id="phone-verify-btn-text">Войти</span>
+                </button>
+            </div>
+
+            <div id="phone-error" class="hidden mt-3 p-3 rounded-lg bg-danger/10 text-danger text-sm"></div>
         </div>
     </div>
 
@@ -1013,6 +1374,22 @@ _DASHBOARD_HTML = """
 
                 const lastErrorEl = document.getElementById('last-error');
                 if (lastErrorEl) lastErrorEl.textContent = d.last_error || '';
+
+                const currentAccountEl = document.getElementById('current-account');
+                if (currentAccountEl) {
+                    const span = currentAccountEl.querySelector('span');
+                    if (span) span.textContent = d.is_running && d.current_account_username ? `${d.current_account_username} (${d.current_account_index + 1})` : '—';
+                }
+
+                renderAccounts(d.accounts || []);
+                const validAccounts = (d.accounts || []).filter(a => a.valid).length;
+                const startBtn = document.getElementById('start-btn');
+                if (startBtn) startBtn.disabled = validAccounts === 0 || d.is_running;
+                const restartBtn = document.getElementById('restart-btn');
+                if (restartBtn) restartBtn.disabled = validAccounts === 0;
+
+                const batchesInput = document.getElementById('batches-per-account-input');
+                if (batchesInput && !batchesInput.matches(':focus')) batchesInput.value = d.batches_per_account || 5;
 
                 const idMinEl = document.getElementById('id-min');
                 const idMaxEl2 = document.getElementById('id-max');
@@ -1218,6 +1595,225 @@ _DASHBOARD_HTML = """
             if (!confirm('Остановить скрапер? Прогресс сохранится.')) return;
             await fetch('/api/stop', {method: 'POST'});
         }
+
+        function renderAccounts(accounts) {
+            const container = document.getElementById('accounts-list');
+            const summary = document.getElementById('accounts-summary');
+            const validCount = accounts.filter(a => a.valid).length;
+            if (summary) summary.textContent = `${validCount} доступных / ${accounts.length}`;
+            if (!container) return;
+            if (accounts.length === 0) {
+                container.innerHTML = '<div class="text-muted italic text-sm">Аккаунты не настроены</div>';
+                return;
+            }
+            container.innerHTML = accounts.map((a, idx) => {
+                const statusColor = a.valid ? 'bg-success' : 'bg-danger';
+                const statusText = a.valid ? 'Доступен' : 'Недоступен';
+                const errorBlock = a.error ? `<div class="text-xs text-danger truncate mt-1" title="${a.error}">${a.error}</div>` : '';
+                return `<div class="bg-bg border ${a.valid ? 'border-success/30' : 'border-danger/30'} rounded-lg p-3 flex flex-col justify-between">
+                    <div class="flex items-start justify-between">
+                        <div>
+                            <div class="text-sm font-semibold text-text">${a.username || 'Аккаунт'}</div>
+                            <div class="text-xs text-muted">ID: ${a.user_id || '—'}</div>
+                            <div class="text-xs text-muted font-mono">${a.token_prefix || ''}</div>
+                        </div>
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${a.valid ? 'bg-success/15 text-success' : 'bg-danger/15 text-danger'}">
+                            <span class="w-1.5 h-1.5 rounded-full ${statusColor}"></span>${statusText}
+                        </span>
+                    </div>
+                    ${errorBlock}
+                    <div class="flex gap-2 mt-3">
+                        <button onclick="checkAccount(${idx})" class="btn-press flex-1 flex items-center justify-center gap-1 bg-border hover:bg-border/80 text-text px-2 py-1.5 rounded-md text-xs font-medium transition-colors">
+                            <i data-lucide="refresh-cw" class="w-3 h-3"></i> Проверить
+                        </button>
+                        <button onclick="removeAccount(${idx})" class="btn-press flex items-center justify-center gap-1 bg-danger/15 hover:bg-danger/25 text-danger px-2 py-1.5 rounded-md text-xs font-medium transition-colors">
+                            <i data-lucide="trash-2" class="w-3 h-3"></i>
+                        </button>
+                    </div>
+                </div>`;
+            }).join('');
+            lucide.createIcons();
+        }
+
+        async function addToken() {
+            const input = document.getElementById('token-input');
+            const token = input?.value?.trim();
+            if (!token) return;
+            input.value = '';
+            try {
+                const res = await fetch('/api/accounts', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({token})
+                });
+                const data = await res.json();
+                if (!data.ok) alert(data.error || 'Ошибка добавления токена');
+            } catch (err) {
+                alert('Ошибка сети');
+            }
+        }
+
+        async function checkAccount(idx) {
+            try {
+                await fetch(`/api/accounts/${idx}/check`, {method: 'POST'});
+            } catch (err) {
+                alert('Ошибка сети');
+            }
+        }
+
+        async function removeAccount(idx) {
+            if (!confirm('Удалить этот аккаунт?')) return;
+            try {
+                await fetch(`/api/accounts/${idx}`, {method: 'DELETE'});
+            } catch (err) {
+                alert('Ошибка сети');
+            }
+        }
+
+        async function updateBatchesPerAccount() {
+            const val = parseInt(document.getElementById('batches-per-account-input').value);
+            if (isNaN(val) || val < 1) return;
+            await fetch('/api/batches-per-account', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({batches: val})
+            });
+        }
+
+        async function startScraper() {
+            const btn = document.getElementById('start-btn');
+            const btnText = document.getElementById('start-btn-text');
+            if (btn) btn.disabled = true;
+            if (btnText) btnText.textContent = 'Запуск...';
+            try {
+                const res = await fetch('/api/start', {method: 'POST'});
+                const data = await res.json();
+                if (btnText) btnText.textContent = data.ok ? 'Запущен' : 'Ошибка';
+                if (!data.ok) alert(data.error || 'Ошибка запуска');
+            } catch {
+                if (btnText) btnText.textContent = 'Ошибка';
+            }
+            setTimeout(() => {
+                if (btnText) btnText.textContent = 'Старт';
+                if (btn) btn.disabled = false;
+            }, 2000);
+        }
+
+        function openPhoneModal() {
+            document.getElementById('phone-modal')?.classList.remove('hidden');
+            document.getElementById('phone-step-1')?.classList.remove('hidden');
+            document.getElementById('phone-step-2')?.classList.add('hidden');
+            document.getElementById('phone-step-3')?.classList.add('hidden');
+            document.getElementById('phone-error')?.classList.add('hidden');
+            document.getElementById('captcha-frame')?.removeAttribute('src');
+            lucide.createIcons();
+        }
+
+        function closePhoneModal() {
+            document.getElementById('phone-modal')?.classList.add('hidden');
+            cancelPhoneAuth();
+        }
+
+        let phonePollTimer = null;
+
+        async function initPhoneAuth() {
+            const input = document.getElementById('phone-input');
+            const phone = input?.value?.trim();
+            if (!/^\\+7\\d{10}$/.test(phone)) {
+                showPhoneError('Введите номер в формате +79991234567');
+                return;
+            }
+            const btn = document.getElementById('phone-init-btn');
+            const btnText = document.getElementById('phone-init-btn-text');
+            if (btn) btn.disabled = true;
+            if (btnText) btnText.textContent = 'Отправка...';
+            try {
+                const res = await fetch('/api/auth/phone/init', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({phone})
+                });
+                const data = await res.json();
+                if (!data.ok) {
+                    showPhoneError(data.error || 'Ошибка');
+                    if (btn) btn.disabled = false;
+                    if (btnText) btnText.textContent = 'Получить код';
+                    return;
+                }
+                document.getElementById('phone-step-1')?.classList.add('hidden');
+                document.getElementById('phone-step-2')?.classList.remove('hidden');
+                const frame = document.getElementById('captcha-frame');
+                if (frame && data.solver_url) frame.src = data.solver_url;
+                phonePollTimer = setInterval(pollPhoneStatus, 1000);
+            } catch (err) {
+                showPhoneError('Ошибка сети');
+                if (btn) btn.disabled = false;
+                if (btnText) btnText.textContent = 'Получить код';
+            }
+        }
+
+        async function pollPhoneStatus() {
+            try {
+                const res = await fetch('/api/auth/phone/status');
+                const data = await res.json();
+                if (data.stage === 'code') {
+                    clearInterval(phonePollTimer);
+                    phonePollTimer = null;
+                    document.getElementById('phone-step-2')?.classList.add('hidden');
+                    document.getElementById('phone-step-3')?.classList.remove('hidden');
+                } else if (data.stage === 'error') {
+                    clearInterval(phonePollTimer);
+                    phonePollTimer = null;
+                    showPhoneError(data.error || 'Ошибка авторизации');
+                }
+            } catch {}
+        }
+
+        async function verifyPhoneCode() {
+            const input = document.getElementById('phone-code-input');
+            const code = input?.value?.trim();
+            if (!code) return;
+            const btn = document.getElementById('phone-verify-btn');
+            const btnText = document.getElementById('phone-verify-btn-text');
+            if (btn) btn.disabled = true;
+            if (btnText) btnText.textContent = 'Вход...';
+            try {
+                const res = await fetch('/api/auth/phone/verify', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({code})
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    closePhoneModal();
+                } else {
+                    showPhoneError(data.error || 'Ошибка входа');
+                    if (btn) btn.disabled = false;
+                    if (btnText) btnText.textContent = 'Войти';
+                }
+            } catch {
+                showPhoneError('Ошибка сети');
+                if (btn) btn.disabled = false;
+                if (btnText) btnText.textContent = 'Войти';
+            }
+        }
+
+        async function cancelPhoneAuth() {
+            if (phonePollTimer) {
+                clearInterval(phonePollTimer);
+                phonePollTimer = null;
+            }
+            try {
+                await fetch('/api/auth/phone/cancel', {method: 'POST'});
+            } catch {}
+        }
+
+        function showPhoneError(message) {
+            const el = document.getElementById('phone-error');
+            if (!el) return;
+            el.textContent = message;
+            el.classList.remove('hidden');
+        }
     </script>
 </body>
 </html>
@@ -1252,10 +1848,12 @@ async def _handle_ws(request: web.Request) -> web.WebSocketResponse:
 
 async def _handle_cooldown(request: web.Request) -> web.Response:
     state: ScrapingState = request.app["state"]
+    account_manager: AccountManager = request.app["account_manager"]
     try:
         data = await request.json()
         seconds = float(data.get("seconds", 10))
         state.cooldown_seconds = max(0, seconds)
+        account_manager.save(state)
         logger.info("Cooldown updated to %.1f seconds", state.cooldown_seconds)
         await _broadcast_state(state)
         return web.json_response({"ok": True, "cooldown": state.cooldown_seconds})
@@ -1265,10 +1863,12 @@ async def _handle_cooldown(request: web.Request) -> web.Response:
 
 async def _handle_reconnect_cooldown(request: web.Request) -> web.Response:
     state: ScrapingState = request.app["state"]
+    account_manager: AccountManager = request.app["account_manager"]
     try:
         data = await request.json()
         seconds = float(data.get("seconds", 20))
         state.reconnect_cooldown_seconds = max(0, seconds)
+        account_manager.save(state)
         logger.info("Reconnect cooldown updated to %.1f seconds", state.reconnect_cooldown_seconds)
         await _broadcast_state(state)
         return web.json_response({"ok": True, "reconnect_cooldown": state.reconnect_cooldown_seconds})
@@ -1318,8 +1918,14 @@ async def _handle_save(request: web.Request) -> web.Response:
 
 async def _handle_stop(request: web.Request) -> web.Response:
     state: ScrapingState = request.app["state"]
+    manager: ScraperManager = request.app["manager"]
+    account_manager: AccountManager = request.app["account_manager"]
     state.is_running = False
     logger.info("Stop signal received")
+    await manager.stop()
+    await account_manager.cleanup()
+    state.current_account_index = -1
+    state.current_account_username = None
     await _broadcast_state(state)
     return web.json_response({"ok": True})
 
@@ -1349,6 +1955,7 @@ async def _handle_range(request: web.Request) -> web.Response:
 async def _handle_restart(request: web.Request) -> web.Response:
     state: ScrapingState = request.app["state"]
     manager: ScraperManager = request.app["manager"]
+    account_manager: AccountManager = request.app["account_manager"]
     try:
         data = await request.json()
         id_min = int(data.get("id_min", state.id_min))
@@ -1358,7 +1965,11 @@ async def _handle_restart(request: web.Request) -> web.Response:
         if id_min >= id_max or id_step <= 0:
             return web.json_response({"ok": False, "error": "Invalid range"}, status=400)
 
+        if account_manager.valid_count() == 0:
+            return web.json_response({"ok": False, "error": "Нет доступных аккаунтов. Добавьте и проверьте аккаунт."}, status=400)
+
         state.set_range(id_min, id_max, id_step)
+        account_manager.save(state)
         logger.info("Restarting scraper with range %d-%d step %d", id_min, id_max, id_step)
         await _broadcast_state(state)
 
@@ -1366,6 +1977,20 @@ async def _handle_restart(request: web.Request) -> web.Response:
         return web.json_response({"ok": started})
     except Exception as exc:
         logger.error("Restart failed: %s", exc)
+        return web.json_response({"ok": False, "error": str(exc)}, status=500)
+
+
+async def _handle_start(request: web.Request) -> web.Response:
+    state: ScrapingState = request.app["state"]
+    manager: ScraperManager = request.app["manager"]
+    account_manager: AccountManager = request.app["account_manager"]
+    try:
+        if account_manager.valid_count() == 0:
+            return web.json_response({"ok": False, "error": "Нет доступных аккаунтов. Добавьте и проверьте аккаунт."}, status=400)
+        started = await manager.start()
+        return web.json_response({"ok": started})
+    except Exception as exc:
+        logger.error("Start failed: %s", exc)
         return web.json_response({"ok": False, "error": str(exc)}, status=500)
 
 
@@ -1390,6 +2015,242 @@ async def _handle_download(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": str(exc)}, status=500)
 
 
+async def _handle_accounts(request: web.Request) -> web.Response:
+    account_manager: AccountManager = request.app["account_manager"]
+    return web.json_response({"ok": True, "accounts": account_manager.to_dict()})
+
+
+async def _handle_add_token(request: web.Request) -> web.Response:
+    state: ScrapingState = request.app["state"]
+    account_manager: AccountManager = request.app["account_manager"]
+    try:
+        data = await request.json()
+        token = data.get("token", "").strip()
+        if not token:
+            return web.json_response({"ok": False, "error": "Empty token"}, status=400)
+        account = await account_manager.validate_token(token)
+        if not account.valid:
+            return web.json_response({"ok": False, "error": account.error or "Token validation failed", "account": account.to_dict()}, status=400)
+        await account_manager.add_account(account)
+        account_manager.save(state)
+        await _broadcast_state(state)
+        return web.json_response({"ok": True, "account": account.to_dict()})
+    except Exception as exc:
+        logger.exception("Add token failed")
+        return web.json_response({"ok": False, "error": str(exc)}, status=500)
+
+
+async def _handle_check_account(request: web.Request) -> web.Response:
+    state: ScrapingState = request.app["state"]
+    account_manager: AccountManager = request.app["account_manager"]
+    try:
+        idx = int(request.match_info["idx"])
+        if not 0 <= idx < len(account_manager.accounts):
+            return web.json_response({"ok": False, "error": "Account not found"}, status=404)
+        account = await account_manager.validate_token(account_manager.accounts[idx].token)
+        await account_manager.add_account(account)
+        account_manager.save(state)
+        await _broadcast_state(state)
+        return web.json_response({"ok": account.valid, "account": account.to_dict(), "error": account.error})
+    except Exception as exc:
+        logger.exception("Check account failed")
+        return web.json_response({"ok": False, "error": str(exc)}, status=500)
+
+
+async def _handle_remove_account(request: web.Request) -> web.Response:
+    state: ScrapingState = request.app["state"]
+    account_manager: AccountManager = request.app["account_manager"]
+    try:
+        idx = int(request.match_info["idx"])
+        removed = await account_manager.remove_account(idx)
+        if not removed:
+            return web.json_response({"ok": False, "error": "Account not found"}, status=404)
+        account_manager.save(state)
+        await _broadcast_state(state)
+        return web.json_response({"ok": True})
+    except Exception as exc:
+        logger.exception("Remove account failed")
+        return web.json_response({"ok": False, "error": str(exc)}, status=500)
+
+
+async def _handle_batches_per_account(request: web.Request) -> web.Response:
+    state: ScrapingState = request.app["state"]
+    account_manager: AccountManager = request.app["account_manager"]
+    try:
+        data = await request.json()
+        batches = int(data.get("batches", state.batches_per_account))
+        if batches < 1:
+            return web.json_response({"ok": False, "error": "Must be at least 1"}, status=400)
+        state.batches_per_account = batches
+        account_manager.save(state)
+        await _broadcast_state(state)
+        return web.json_response({"ok": True, "batches_per_account": state.batches_per_account})
+    except Exception as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+
+async def _phone_auth_waiter(account_manager: AccountManager, state: ScrapingState) -> None:
+    pending = account_manager.get_pending_phone_auth()
+    if not pending:
+        return
+    future = pending.get("future")
+    if not future:
+        return
+    try:
+        token = await asyncio.wait_for(future, timeout=300)
+    except asyncio.TimeoutError:
+        await account_manager.stop_captcha_solver()
+        account_manager.set_pending_phone_auth({
+            "phone": pending.get("phone"),
+            "stage": "error",
+            "auth_token": None,
+            "error": "Капча не решена за 5 минут",
+        })
+        await _broadcast_state(state)
+        return
+    except Exception as exc:
+        await account_manager.stop_captcha_solver()
+        account_manager.set_pending_phone_auth({
+            "phone": pending.get("phone"),
+            "stage": "error",
+            "auth_token": None,
+            "error": str(exc),
+        })
+        await _broadcast_state(state)
+        return
+
+    await account_manager.stop_captcha_solver()
+    cl = Tuiclient()
+    try:
+        await cl._netw_connect()
+        auth_token = await cl.send_verify_code(pending["phone"], token)
+        account_manager.set_pending_phone_auth({
+            "phone": pending["phone"],
+            "stage": "code",
+            "auth_token": auth_token,
+            "error": None,
+        })
+        state.add_reinit_log(f"Код отправлен на {pending['phone']}")
+    except Exception as exc:
+        account_manager.set_pending_phone_auth({
+            "phone": pending.get("phone"),
+            "stage": "error",
+            "auth_token": None,
+            "error": str(exc),
+        })
+    finally:
+        try:
+            await cl.disconnect()
+        except Exception:
+            pass
+    await _broadcast_state(state)
+
+
+async def _handle_phone_init(request: web.Request) -> web.Response:
+    state: ScrapingState = request.app["state"]
+    account_manager: AccountManager = request.app["account_manager"]
+    try:
+        data = await request.json()
+        phone = data.get("phone", "").strip()
+        if not re.match(r"^\+7\d{10}$", phone):
+            return web.json_response({"ok": False, "error": "Номер должен быть в формате +79991234567"}, status=400)
+        if account_manager.get_pending_phone_auth():
+            return web.json_response({"ok": False, "error": "Уже идёт процесс входа"}, status=409)
+
+        cl = Tuiclient()
+        captcha_url = ""
+        try:
+            await cl._netw_connect()
+            captcha_url = await cl.get_captcha_url(phone)
+        except Exception as exc:
+            return web.json_response({"ok": False, "error": f"Ошибка капчи: {exc}"}, status=500)
+        finally:
+            try:
+                await cl.disconnect()
+            except Exception:
+                pass
+
+        solver_url = await account_manager.start_captcha_solver(captcha_url)
+        pending: Dict[str, Any] = {
+            "phone": phone,
+            "stage": "captcha",
+            "auth_token": None,
+            "error": None,
+            "future": account_manager._captcha_token_future,
+        }
+        account_manager.set_pending_phone_auth(pending)
+        asyncio.create_task(_phone_auth_waiter(account_manager, state))
+        await _broadcast_state(state)
+        return web.json_response({"ok": True, "solver_url": solver_url, "stage": "captcha"})
+    except Exception as exc:
+        logger.exception("Phone init failed")
+        return web.json_response({"ok": False, "error": str(exc)}, status=500)
+
+
+async def _handle_phone_status(request: web.Request) -> web.Response:
+    account_manager: AccountManager = request.app["account_manager"]
+    pending = account_manager.get_pending_phone_auth()
+    if not pending:
+        return web.json_response({"ok": True, "stage": "idle"})
+    return web.json_response({
+        "ok": True,
+        "stage": pending.get("stage"),
+        "phone": pending.get("phone"),
+        "error": pending.get("error"),
+    })
+
+
+async def _handle_phone_verify(request: web.Request) -> web.Response:
+    state: ScrapingState = request.app["state"]
+    account_manager: AccountManager = request.app["account_manager"]
+    try:
+        data = await request.json()
+        code = data.get("code", "").strip()
+        pending = account_manager.get_pending_phone_auth()
+        if not pending or pending.get("stage") != "code" or not pending.get("auth_token"):
+            return web.json_response({"ok": False, "error": "Сначала запросите код"}, status=400)
+
+        cl = Tuiclient()
+        try:
+            await cl._netw_connect()
+            login_token = await cl.check_verify_code(pending["auth_token"], code)
+            cl.token = login_token
+            await cl.finalise_auth()
+            profile = cl.profile
+            account = Account(
+                token=login_token,
+                username=profile.get_name(),
+                user_id=profile.id,
+                valid=True,
+                profile=profile,
+            )
+            await account_manager.add_account(account)
+            account_manager.save(state)
+            account_manager.set_pending_phone_auth(None)
+            await _broadcast_state(state)
+            return web.json_response({"ok": True, "account": account.to_dict()})
+        finally:
+            try:
+                await cl.disconnect()
+            except Exception:
+                pass
+    except Exception as exc:
+        logger.exception("Phone verify failed")
+        return web.json_response({"ok": False, "error": str(exc)}, status=500)
+
+
+async def _handle_phone_cancel(request: web.Request) -> web.Response:
+    state: ScrapingState = request.app["state"]
+    account_manager: AccountManager = request.app["account_manager"]
+    try:
+        await account_manager.stop_captcha_solver()
+        account_manager.set_pending_phone_auth(None)
+        await _broadcast_state(state)
+        return web.json_response({"ok": True})
+    except Exception as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=500)
+
+
 def create_app(state: ScrapingState) -> web.Application:
     app = web.Application()
     app["state"] = state
@@ -1398,12 +2259,22 @@ def create_app(state: ScrapingState) -> web.Application:
     app.router.add_get("/ws", _handle_ws)
     app.router.add_post("/api/cooldown", _handle_cooldown)
     app.router.add_post("/api/reconnect-cooldown", _handle_reconnect_cooldown)
+    app.router.add_post("/api/batches-per-account", _handle_batches_per_account)
     app.router.add_post("/api/pause", _handle_pause)
     app.router.add_post("/api/save", _handle_save)
     app.router.add_post("/api/stop", _handle_stop)
+    app.router.add_post("/api/start", _handle_start)
     app.router.add_post("/api/range", _handle_range)
     app.router.add_post("/api/restart", _handle_restart)
     app.router.add_get("/api/download", _handle_download)
+    app.router.add_get("/api/accounts", _handle_accounts)
+    app.router.add_post("/api/accounts", _handle_add_token)
+    app.router.add_post("/api/accounts/{idx}/check", _handle_check_account)
+    app.router.add_delete("/api/accounts/{idx}", _handle_remove_account)
+    app.router.add_post("/api/auth/phone/init", _handle_phone_init)
+    app.router.add_get("/api/auth/phone/status", _handle_phone_status)
+    app.router.add_post("/api/auth/phone/verify", _handle_phone_verify)
+    app.router.add_post("/api/auth/phone/cancel", _handle_phone_cancel)
 
     return app
 
@@ -1416,19 +2287,24 @@ async def _periodic_broadcast(state: ScrapingState) -> None:
 
 
 async def main() -> None:
+    accounts_path = Path(__file__).resolve().parent.parent / "accounts.json"
+    account_manager = AccountManager(accounts_path)
+
     state = ScrapingState(
         id_min=9_950_000,
         id_max=15_000_000,
         id_step=1000,
-        cooldown_seconds=20.0,
-        reconnect_cooldown_seconds=20.0,
+        cooldown_seconds=account_manager.loaded_settings.get("cooldown_seconds", 20.0),
+        reconnect_cooldown_seconds=account_manager.loaded_settings.get("reconnect_cooldown_seconds", 20.0),
+        batches_per_account=account_manager.loaded_settings.get("batches_per_account", 5),
     )
+    state.account_manager = account_manager
 
     app = create_app(state)
 
     manager = ScraperManager(state)
     app["manager"] = manager
-    await manager.start()
+    app["account_manager"] = account_manager
 
     broadcast_task = asyncio.create_task(_periodic_broadcast(state))
 
@@ -1446,6 +2322,7 @@ async def main() -> None:
         pass
     finally:
         broadcast_task.cancel()
+        await account_manager.cleanup()
         await manager.stop()
         await runner.cleanup()
 
