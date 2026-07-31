@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import json
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -2331,14 +2332,17 @@ async def main() -> None:
     app["manager"] = manager
     app["account_manager"] = account_manager
 
+    port = int(os.environ.get("DASHBOARD_PORT", "8081"))
+    host = os.environ.get("DASHBOARD_HOST", "127.0.0.1")
+
     broadcast_task = asyncio.create_task(_periodic_broadcast(state))
 
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "127.0.0.1", 8081)
+    site = web.TCPSite(runner, host, port)
     await site.start()
 
-    logger.info("🚀 Dashboard running at http://127.0.0.1:8081")
+    logger.info("🚀 Dashboard running at http://%s:%d", host, port)
 
     try:
         while True:
