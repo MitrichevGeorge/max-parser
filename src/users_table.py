@@ -2332,7 +2332,7 @@ async def main() -> None:
     app["manager"] = manager
     app["account_manager"] = account_manager
 
-    port = int(os.environ.get("DASHBOARD_PORT", "8081"))
+    port = int(os.environ.get("DASHBOARD_PORT", "8089"))
     host = os.environ.get("DASHBOARD_HOST", "127.0.0.1")
 
     broadcast_task = asyncio.create_task(_periodic_broadcast(state))

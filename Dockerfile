@@ -11,6 +11,6 @@ COPY . .
 
 ENV DASHBOARD_PORT=8089
 ENV DASHBOARD_HOST=0.0.0.0
-EXPOSE 8081
+EXPOSE 8089
 
 CMD ["python", "src/users_table.py"]
