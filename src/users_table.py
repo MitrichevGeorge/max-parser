@@ -182,6 +182,7 @@ class ScrapingState:
             "progress_percent": round(self.progress_percent, 2),
             "cooldown_seconds": self.cooldown_seconds,
             "reconnect_cooldown_seconds": self.reconnect_cooldown_seconds,
+            "batches_per_account": self.batches_per_account,
             "is_running": self.is_running,
             "is_paused": self.is_paused,
             "is_saving": self.is_saving,
@@ -201,7 +202,6 @@ class ScrapingState:
             "action_label": self._action_label(),
             "action_color": self._action_color(),
             "accounts": self.account_manager.to_dict() if self.account_manager else [],
-            "batches_per_account": self.batches_per_account,
             "current_account_index": self.current_account_index,
             "current_account_username": self.current_account_username,
         }
@@ -285,7 +285,7 @@ class AccountManager:
             ]
             self.loaded_settings = {
                 key: data[key]
-                for key in ("cooldown_seconds", "reconnect_cooldown_seconds", "batches_per_account")
+                for key in ("id_min", "id_max", "id_step", "cooldown_seconds", "reconnect_cooldown_seconds", "batches_per_account")
                 if key in data
             }
         except Exception as exc:
@@ -303,6 +303,9 @@ class AccountManager:
                 }
                 for a in self.accounts
             ],
+            "id_min": state.id_min,
+            "id_max": state.id_max,
+            "id_step": state.id_step,
             "cooldown_seconds": state.cooldown_seconds,
             "reconnect_cooldown_seconds": state.reconnect_cooldown_seconds,
             "batches_per_account": state.batches_per_account,
@@ -1034,85 +1037,100 @@ _DASHBOARD_HTML = """
         <div class="bg-card border border-border rounded-xl p-5 md:p-6 mb-5 card-hover">
             <div class="flex items-center gap-2 mb-4">
                 <i data-lucide="sliders-horizontal" class="w-5 h-5 text-muted"></i>
-                <span class="text-sm font-medium uppercase tracking-wider text-muted">Управление</span>
+                <span class="text-sm font-medium uppercase tracking-wider text-muted">Настройки скрапера</span>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
-                <div>
-                    <label class="block text-xs text-muted mb-1">ID от</label>
-                    <input type="number" id="id-min" value="9950000" min="0" step="1"
-                           class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
+            <form onsubmit="event.preventDefault(); updateRange();" class="space-y-4">
+                <!-- Диапазон -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                        <label class="block text-xs text-muted mb-1">ID от</label>
+                        <input type="number" id="id-min" value="9950000" min="1" step="1"
+                               class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-muted mb-1">ID до</label>
+                        <input type="number" id="id-max" value="15000000" min="1" step="1"
+                               class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-muted mb-1">Шаг батча</label>
+                        <input type="number" id="id-step" value="1000" min="1" step="1"
+                               class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
+                    </div>
                 </div>
-                <div>
-                    <label class="block text-xs text-muted mb-1">ID до</label>
-                    <input type="number" id="id-max" value="15000000" min="0" step="1"
-                           class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
+
+                <!-- Кулдауны и ротация -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                        <label class="block text-xs text-muted mb-1">Кулдаун между батчами (сек)</label>
+                        <div class="flex items-center gap-2">
+                            <input type="number" id="cooldown-input" value="10" min="0" step="0.5"
+                                   class="flex-1 bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
+                            <button onclick="updateCooldown()" type="button" class="btn-press flex items-center gap-1 bg-border hover:bg-border/80 text-text px-3 py-2 rounded-lg text-xs font-medium transition-colors">
+                                <i data-lucide="check" class="w-3 h-3"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-muted mb-1">Кулдаун переключения аккаунта (сек)</label>
+                        <div class="flex items-center gap-2">
+                            <input type="number" id="reconnect-cooldown-input" value="20" min="0" step="0.5"
+                                   class="flex-1 bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
+                            <button onclick="updateReconnectCooldown()" type="button" class="btn-press flex items-center gap-1 bg-border hover:bg-border/80 text-text px-3 py-2 rounded-lg text-xs font-medium transition-colors">
+                                <i data-lucide="check" class="w-3 h-3"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-muted mb-1">Батчей с одного аккаунта</label>
+                        <div class="flex items-center gap-2">
+                            <input type="number" id="batches-per-account-input" value="3" min="1" step="1"
+                                   class="flex-1 bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
+                            <button onclick="updateBatchesPerAccount()" type="button" class="btn-press flex items-center gap-1 bg-border hover:bg-border/80 text-text px-3 py-2 rounded-lg text-xs font-medium transition-colors">
+                                <i data-lucide="check" class="w-3 h-3"></i>
+                            </button>
+                        </div>
+                    </div>
                 </div>
-                <div>
-                    <label class="block text-xs text-muted mb-1">Шаг батча</label>
-                    <input type="number" id="id-step" value="1000" min="1" step="1"
-                           class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
-                </div>
-                <div class="flex items-end">
-                    <button onclick="restartScraper()" id="restart-btn" class="btn-press w-full flex items-center justify-center gap-2 bg-accent hover:bg-accent/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+
+                <div class="flex flex-wrap items-center gap-3 pt-2">
+                    <button onclick="updateRange()" id="range-btn" type="button" class="btn-press flex items-center gap-2 bg-accent hover:bg-accent/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                        <i data-lucide="save" class="w-4 h-4"></i>
+                        <span id="range-btn-text">Сохранить настройки</span>
+                    </button>
+
+                    <button onclick="startScraper()" id="start-btn" type="button" class="btn-press flex items-center gap-2 bg-success hover:bg-success/80 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                        <i data-lucide="play" class="w-4 h-4"></i>
+                        <span id="start-btn-text">Старт</span>
+                    </button>
+
+                    <button onclick="restartScraper()" id="restart-btn" type="button" class="btn-press flex items-center gap-2 bg-accent hover:bg-accent/80 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
                         <i data-lucide="refresh-cw" class="w-4 h-4"></i>
-                        <span id="restart-btn-text">Задать диапазон и перезапустить</span>
+                        <span id="restart-btn-text">Перезапустить</span>
+                    </button>
+
+                    <button onclick="togglePause()" id="pause-btn" type="button" class="btn-press flex items-center gap-2 bg-border hover:bg-border/80 text-text px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                        <i data-lucide="pause" class="w-4 h-4"></i>
+                        <span>Пауза</span>
+                    </button>
+
+                    <button onclick="saveNow()" type="button" class="btn-press flex items-center gap-2 bg-border hover:bg-border/80 text-text px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                        <i data-lucide="download" class="w-4 h-4"></i>
+                        <span>Сохранить Excel</span>
+                    </button>
+
+                    <a href="/api/download" download class="btn-press flex items-center gap-2 bg-purple hover:bg-purple/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors no-underline">
+                        <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
+                        Скачать таблицу
+                    </a>
+
+                    <button onclick="stopScraper()" type="button" class="btn-press flex items-center gap-2 bg-danger hover:bg-danger/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                        <i data-lucide="square" class="w-4 h-4"></i>
+                        Стоп
                     </button>
                 </div>
-            </div>
-
-            <div class="flex flex-wrap items-center gap-3 border-t border-border pt-4">
-                <div class="flex items-center gap-2">
-                    <label class="text-sm text-muted">Кулдаун (сек):</label>
-                    <input type="number" id="cooldown-input" value="10" min="0" step="0.5"
-                           class="w-24 bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors">
-                </div>
-                <button onclick="updateCooldown()" class="btn-press flex items-center gap-2 bg-accent hover:bg-accent/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-                    <i data-lucide="check" class="w-4 h-4"></i>
-                    Применить
-                </button>
-
-                <div class="flex items-center gap-2">
-                    <label class="text-sm text-muted">Кулдаун переподключения (сек):</label>
-                    <input type="number" id="reconnect-cooldown-input" value="20" min="0" step="0.5"
-                           class="w-24 bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors">
-                </div>
-                <button onclick="updateReconnectCooldown()" class="btn-press flex items-center gap-2 bg-accent hover:bg-accent/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-                    <i data-lucide="check" class="w-4 h-4"></i>
-                    Применить
-                </button>
-
-                <div class="flex items-center gap-2">
-                    <label class="text-sm text-muted">Батчей с аккаунта:</label>
-                    <input type="number" id="batches-per-account-input" value="3" min="1" step="1"
-                           class="w-24 bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors">
-                </div>
-                <button onclick="updateBatchesPerAccount()" class="btn-press flex items-center gap-2 bg-accent hover:bg-accent/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-                    <i data-lucide="check" class="w-4 h-4"></i>
-                    Применить
-                </button>
-
-                <button onclick="startScraper()" id="start-btn" class="btn-press flex items-center gap-2 bg-accent hover:bg-accent/80 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-                    <i data-lucide="play" class="w-4 h-4"></i>
-                    <span id="start-btn-text">Старт</span>
-                </button>
-                <button onclick="togglePause()" id="pause-btn" class="btn-press flex items-center gap-2 bg-border hover:bg-border/80 text-text px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-                    <i data-lucide="pause" class="w-4 h-4"></i>
-                    <span>Пауза</span>
-                </button>
-                <button onclick="saveNow()" class="btn-press flex items-center gap-2 bg-success hover:bg-success/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-                    <i data-lucide="save" class="w-4 h-4"></i>
-                    <span id="save-btn-text">Сохранить сейчас</span>
-                </button>
-                <a href="/api/download" download class="btn-press flex items-center gap-2 bg-purple hover:bg-purple/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors no-underline">
-                    <i data-lucide="download" class="w-4 h-4"></i>
-                    Скачать таблицу
-                </a>
-                <button onclick="stopScraper()" class="btn-press flex items-center gap-2 bg-danger hover:bg-danger/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-                    <i data-lucide="square" class="w-4 h-4"></i>
-                    Стоп
-                </button>
-            </div>
+            </form>
         </div>
 
         <div class="bg-card border border-border rounded-xl p-5 md:p-6 mb-5 card-hover">
@@ -1395,13 +1413,13 @@ _DASHBOARD_HTML = """
                 const idMinEl = document.getElementById('id-min');
                 const idMaxEl2 = document.getElementById('id-max');
                 const idStepEl = document.getElementById('id-step');
-                if (idMinEl && !idMinEl.matches(':focus')) idMinEl.value = d.id_min || 0;
-                if (idMaxEl2 && !idMaxEl2.matches(':focus')) idMaxEl2.value = d.id_max || 0;
+                if (idMinEl && !idMinEl.matches(':focus')) idMinEl.value = d.id_min || 9950000;
+                if (idMaxEl2 && !idMaxEl2.matches(':focus')) idMaxEl2.value = d.id_max || 15000000;
                 if (idStepEl && !idStepEl.matches(':focus')) idStepEl.value = d.id_step || 1000;
 
                 const cooldownInput = document.getElementById('cooldown-input');
                 const reconnectInput = document.getElementById('reconnect-cooldown-input');
-                if (cooldownInput && !cooldownInput.matches(':focus')) cooldownInput.value = d.cooldown_seconds || 10;
+                if (cooldownInput && !cooldownInput.matches(':focus')) cooldownInput.value = d.cooldown_seconds || 20;
                 if (reconnectInput && !reconnectInput.matches(':focus')) reconnectInput.value = d.reconnect_cooldown_seconds || 20;
 
                 const pauseBtn = document.getElementById('pause-btn');
@@ -1562,33 +1580,81 @@ _DASHBOARD_HTML = """
             }, 2000);
         }
 
-        async function restartScraper() {
+        function readRange() {
             const id_min = parseInt(document.getElementById('id-min').value);
             const id_max = parseInt(document.getElementById('id-max').value);
             const id_step = parseInt(document.getElementById('id-step').value);
-            if (isNaN(id_min) || isNaN(id_max) || isNaN(id_step) || id_min >= id_max || id_step <= 0) {
-                alert('Некорректный диапазон: ID от должно быть меньше ID до, шаг батча больше 0.');
+            return {id_min, id_max, id_step};
+        }
+
+        function validateRange({id_min, id_max, id_step}) {
+            if (isNaN(id_min) || isNaN(id_max) || isNaN(id_step)) {
+                return 'Введите числовые значения диапазона';
+            }
+            if (id_min < 1 || id_max < 1 || id_step < 1) {
+                return 'Значения должны быть ≥ 1';
+            }
+            if (id_min >= id_max) {
+                return 'ID от должно быть меньше ID до';
+            }
+            if (id_step > (id_max - id_min)) {
+                return 'Шаг не может быть больше диапазона';
+            }
+            return null;
+        }
+
+        async function updateRange() {
+            const range = readRange();
+            const error = validateRange(range);
+            if (error) {
+                alert(error);
                 return;
             }
-            if (!confirm('Перезапустить скрапер с новым диапазоном? Текущий файл таблицы будет перезаписан.')) return;
+            const btn = document.getElementById('range-btn');
+            const btnText = document.getElementById('range-btn-text');
+            if (btn) btn.disabled = true;
+            if (btnText) btnText.textContent = 'Сохранение...';
+            try {
+                const res = await fetch('/api/range', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(range)
+                });
+                const data = await res.json();
+                if (!data.ok) alert(data.error || 'Ошибка');
+                if (btnText) btnText.textContent = data.ok ? 'Сохранено!' : 'Ошибка';
+            } catch {
+                if (btnText) btnText.textContent = 'Ошибка';
+            }
+            setTimeout(() => {
+                if (btnText) btnText.textContent = 'Сохранить настройки';
+                if (btn) btn.disabled = false;
+            }, 2000);
+        }
+
+        async function restartScraper() {
+            const range = readRange();
+            const error = validateRange(range);
+            if (error) {
+                alert(error);
+                return;
+            }
+            if (!confirm('Перезапустить скрапер? Текущий файл таблицы будет перезаписан.')) return;
 
             const btnText = document.getElementById('restart-btn-text');
             const btn = document.getElementById('restart-btn');
             if (btn) btn.disabled = true;
             if (btnText) btnText.textContent = 'Перезапуск...';
             try {
-                const res = await fetch('/api/restart', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({id_min, id_max, id_step})
-                });
+                const res = await fetch('/api/restart', {method: 'POST'});
                 const data = await res.json();
+                if (!data.ok) alert(data.error || 'Ошибка перезапуска');
                 if (btnText) btnText.textContent = data.ok ? 'Перезапущен!' : 'Ошибка';
             } catch {
                 if (btnText) btnText.textContent = 'Ошибка';
             }
             setTimeout(() => {
-                if (btnText) btnText.textContent = 'Задать диапазон и перезапустить';
+                if (btnText) btnText.textContent = 'Перезапустить';
                 if (btn) btn.disabled = false;
             }, 2000);
         }
@@ -1955,16 +2021,22 @@ async def _handle_stop(request: web.Request) -> web.Response:
 
 async def _handle_range(request: web.Request) -> web.Response:
     state: ScrapingState = request.app["state"]
+    account_manager: AccountManager = request.app["account_manager"]
     try:
         data = await request.json()
         id_min = int(data.get("id_min", state.id_min))
         id_max = int(data.get("id_max", state.id_max))
         id_step = int(data.get("id_step", state.id_step))
 
-        if id_min >= id_max or id_step <= 0:
-            return web.json_response({"ok": False, "error": "Invalid range"}, status=400)
+        if id_min < 1 or id_max < 1 or id_step < 1:
+            return web.json_response({"ok": False, "error": "Значения должны быть положительными числами"}, status=400)
+        if id_min >= id_max:
+            return web.json_response({"ok": False, "error": "ID от должно быть меньше ID до"}, status=400)
+        if id_step > (id_max - id_min):
+            return web.json_response({"ok": False, "error": "Шаг не может быть больше диапазона"}, status=400)
 
         state.set_range(id_min, id_max, id_step)
+        account_manager.save(state)
         logger.info("Range updated to %d-%d step %d", id_min, id_max, id_step)
         await _broadcast_state(state)
         return web.json_response({
@@ -1980,20 +2052,12 @@ async def _handle_restart(request: web.Request) -> web.Response:
     manager: ScraperManager = request.app["manager"]
     account_manager: AccountManager = request.app["account_manager"]
     try:
-        data = await request.json()
-        id_min = int(data.get("id_min", state.id_min))
-        id_max = int(data.get("id_max", state.id_max))
-        id_step = int(data.get("id_step", state.id_step))
-
-        if id_min >= id_max or id_step <= 0:
-            return web.json_response({"ok": False, "error": "Invalid range"}, status=400)
-
         if account_manager.valid_count() == 0:
             return web.json_response({"ok": False, "error": "Нет доступных аккаунтов. Добавьте и проверьте аккаунт."}, status=400)
 
-        state.set_range(id_min, id_max, id_step)
+        state.set_range(state.id_min, state.id_max, state.id_step)
         account_manager.save(state)
-        logger.info("Restarting scraper with range %d-%d step %d", id_min, id_max, id_step)
+        logger.info("Restarting scraper with range %d-%d step %d", state.id_min, state.id_max, state.id_step)
         await _broadcast_state(state)
 
         started = await manager.restart()
@@ -2317,9 +2381,9 @@ async def main() -> None:
     account_manager = AccountManager(accounts_path)
 
     state = ScrapingState(
-        id_min=9_950_000,
-        id_max=15_000_000,
-        id_step=1000,
+        id_min=account_manager.loaded_settings.get("id_min", 9_950_000),
+        id_max=account_manager.loaded_settings.get("id_max", 15_000_000),
+        id_step=account_manager.loaded_settings.get("id_step", 1000),
         cooldown_seconds=account_manager.loaded_settings.get("cooldown_seconds", 20.0),
         reconnect_cooldown_seconds=account_manager.loaded_settings.get("reconnect_cooldown_seconds", 20.0),
         batches_per_account=account_manager.loaded_settings.get("batches_per_account", 3),
@@ -2332,7 +2396,7 @@ async def main() -> None:
     app["manager"] = manager
     app["account_manager"] = account_manager
 
-    port = int(os.environ.get("DASHBOARD_PORT", "8089"))
+    port = int(os.environ.get("DASHBOARD_PORT", "8081"))
     host = os.environ.get("DASHBOARD_HOST", "127.0.0.1")
 
     broadcast_task = asyncio.create_task(_periodic_broadcast(state))
