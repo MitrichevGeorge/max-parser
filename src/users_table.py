@@ -45,7 +45,7 @@ class ScrapingState:
 
     cooldown_seconds: float = 10.0
     reconnect_cooldown_seconds: float = 20.0
-    batches_per_account: int = 5
+    batches_per_account: int = 3
     start_time: float = field(default_factory=time.time)
     last_batch_time: float = field(default_factory=time.time)
     avg_batch_duration: float = 0.0
@@ -1084,7 +1084,7 @@ _DASHBOARD_HTML = """
 
                 <div class="flex items-center gap-2">
                     <label class="text-sm text-muted">Батчей с аккаунта:</label>
-                    <input type="number" id="batches-per-account-input" value="5" min="1" step="1"
+                    <input type="number" id="batches-per-account-input" value="3" min="1" step="1"
                            class="w-24 bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors">
                 </div>
                 <button onclick="updateBatchesPerAccount()" class="btn-press flex items-center gap-2 bg-accent hover:bg-accent/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
@@ -1390,7 +1390,7 @@ _DASHBOARD_HTML = """
                 if (restartBtn) restartBtn.disabled = validAccounts === 0;
 
                 const batchesInput = document.getElementById('batches-per-account-input');
-                if (batchesInput && !batchesInput.matches(':focus')) batchesInput.value = d.batches_per_account || 5;
+                if (batchesInput && !batchesInput.matches(':focus')) batchesInput.value = d.batches_per_account || 3;
 
                 const idMinEl = document.getElementById('id-min');
                 const idMaxEl2 = document.getElementById('id-max');
@@ -2322,7 +2322,7 @@ async def main() -> None:
         id_step=1000,
         cooldown_seconds=account_manager.loaded_settings.get("cooldown_seconds", 20.0),
         reconnect_cooldown_seconds=account_manager.loaded_settings.get("reconnect_cooldown_seconds", 20.0),
-        batches_per_account=account_manager.loaded_settings.get("batches_per_account", 5),
+        batches_per_account=account_manager.loaded_settings.get("batches_per_account", 3),
     )
     state.account_manager = account_manager
 
