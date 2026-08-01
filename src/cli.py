@@ -76,7 +76,6 @@ async def main():
     with patch_stdout(raw=True):
         q = Tuiclient()
         await q.begin()
-        await q.select_account()
 
         print("Enter commands as: [opcode] [json dict]")
         print("Examples: 49 {\"chatId\": 123}   or   GET_MESSAGES {\"chatId\": 123}")
@@ -101,6 +100,8 @@ async def main():
                 break
             if not text:
                 continue
+            if text.lower() in {"login", "signin"}:
+                await q.select_account()
 
             try:
                 opcode, payload = parse_command(text)

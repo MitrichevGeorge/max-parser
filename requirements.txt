@@ -14,3 +14,4 @@ httpx
 cryptography
 argon2-cffi
 eventkit
+python-socks

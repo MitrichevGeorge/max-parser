@@ -9,8 +9,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 COPY . .
 
-ENV DASHBOARD_PORT=8089
+ENV DASHBOARD_PORT=8081
 ENV DASHBOARD_HOST=0.0.0.0
-EXPOSE 8089
+EXPOSE 8081
 
 CMD ["python", "src/users_table.py"]

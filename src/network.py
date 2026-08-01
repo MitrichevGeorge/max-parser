@@ -9,6 +9,7 @@ from typing import List, Dict, Any
 from loguru import logger
 from pydantic import TypeAdapter
 import websockets
+from python_socks.async_.asyncio import Proxy
 from operator import itemgetter
 from datetime import datetime
 from enum import IntEnum
@@ -74,6 +75,7 @@ class NetworkMixin:
         
         self.on_new_message = Event()
         self.on_in_call = Event()
+        self.proxy: str | None = None
 
     async def _recv(self):
         if not isinstance(self.connection, websockets.ClientConnection):
@@ -90,7 +92,12 @@ class NetworkMixin:
         await self.connection.send(self.codec.payload_to_bytes(opcode, payload))
 
     async def _netw_connect(self):
-        self.connection = await websockets.connect(pl.URL, additional_headers=pl.HEADERS)
+        if self.proxy:
+            proxy = Proxy.from_url(self.proxy)
+            sock = await proxy.connect(dest_host='api.oneme.ru', dest_port=443)
+            self.connection = await websockets.connect(pl.URL, sock=sock, additional_headers=pl.HEADERS)
+        else:
+            self.connection = await websockets.connect(pl.URL, additional_headers=pl.HEADERS)
         print(f"Successfully connected to {pl.URL}")
         self._reader_task = asyncio.create_task(self._reader_loop())
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())

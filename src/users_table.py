@@ -8,6 +8,7 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
 
@@ -22,6 +23,7 @@ from aiohttp import web
 import aiohttp
 from classes import UserProfile
 from client import Tuiclient
+from python_socks.async_.asyncio import Proxy
 
 import captcha
 
@@ -43,9 +45,12 @@ class ScrapingState:
     id_step: int = 1000
     total_ids: int = field(init=False)
 
-    cooldown_seconds: float = 10.0
+    cooldown_seconds: float = 20.0
     reconnect_cooldown_seconds: float = 20.0
+    reinit_cooldown_seconds: float = 5.0
     batches_per_account: int = 3
+    proxy_url: Optional[str] = None
+    proxy_enabled: bool = False
     start_time: float = field(default_factory=time.time)
     last_batch_time: float = field(default_factory=time.time)
     avg_batch_duration: float = 0.0
@@ -182,7 +187,10 @@ class ScrapingState:
             "progress_percent": round(self.progress_percent, 2),
             "cooldown_seconds": self.cooldown_seconds,
             "reconnect_cooldown_seconds": self.reconnect_cooldown_seconds,
+            "reinit_cooldown_seconds": self.reinit_cooldown_seconds,
             "batches_per_account": self.batches_per_account,
+            "proxy_url": self.proxy_url,
+            "proxy_enabled": self.proxy_enabled,
             "is_running": self.is_running,
             "is_paused": self.is_paused,
             "is_saving": self.is_saving,
@@ -266,6 +274,7 @@ class AccountManager:
         self._captcha_server_task: Optional[asyncio.Task] = None
         self._captcha_token_future: Optional[asyncio.Future] = None
         self.loaded_settings: Dict[str, Any] = {}
+        self.proxy_url: Optional[str] = None
         self.load()
 
     def load(self) -> None:
@@ -285,7 +294,7 @@ class AccountManager:
             ]
             self.loaded_settings = {
                 key: data[key]
-                for key in ("id_min", "id_max", "id_step", "cooldown_seconds", "reconnect_cooldown_seconds", "batches_per_account")
+                for key in ("id_min", "id_max", "id_step", "cooldown_seconds", "reconnect_cooldown_seconds", "reinit_cooldown_seconds", "batches_per_account", "proxy_url", "proxy_enabled")
                 if key in data
             }
         except Exception as exc:
@@ -308,7 +317,10 @@ class AccountManager:
             "id_step": state.id_step,
             "cooldown_seconds": state.cooldown_seconds,
             "reconnect_cooldown_seconds": state.reconnect_cooldown_seconds,
+            "reinit_cooldown_seconds": state.reinit_cooldown_seconds,
             "batches_per_account": state.batches_per_account,
+            "proxy_url": state.proxy_url,
+            "proxy_enabled": state.proxy_enabled,
         }
         try:
             self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -333,6 +345,7 @@ class AccountManager:
 
     async def validate_token(self, token: str) -> Account:
         cl = Tuiclient()
+        cl.proxy = self.proxy_url
         try:
             await cl._netw_connect()
             cl.token = token
@@ -629,6 +642,12 @@ async def _run_scraper(state: ScrapingState) -> None:
             ):
                 return False
 
+        if state.is_running and state.reinit_cooldown_seconds > 0:
+            if not await _wait_while_running(
+                state, state.reinit_cooldown_seconds, "reinit", "Кулдаун реинициализации"
+            ):
+                return False
+
         next_idx = manager.next_valid_index(active_account_index)
         if next_idx is None:
             state.last_error = "Нет доступных аккаунтов для продолжения"
@@ -647,6 +666,7 @@ async def _run_scraper(state: ScrapingState) -> None:
         await _broadcast_state(state)
 
         cl = Tuiclient()
+        cl.proxy = manager.proxy_url
         if not init_log_done:
             await cl._init_log()
             init_log_done = True
@@ -732,6 +752,10 @@ async def _run_scraper(state: ScrapingState) -> None:
                 state.add_reinit_log(f"Ошибка батча: {exc}")
                 await close_active()
                 force_switch()
+                if state.reinit_cooldown_seconds > 0:
+                    await _wait_while_running(
+                        state, state.reinit_cooldown_seconds, "reinit", "Кулдаун после ошибки"
+                    )
                 continue
 
             batch_duration = time.time() - batch_start
@@ -930,8 +954,9 @@ _DASHBOARD_HTML = """
                      style="width: 0%; background: linear-gradient(90deg, #58a6ff, #3fb950);"></div>
             </div>
             <div class="flex justify-between mt-2 text-sm text-muted">
-                <span id="current-id">0</span>
-                <span id="id-max">10,000,000</span>
+                <span id="progress-min">0</span>
+                <span id="progress-current" class="text-accent font-medium">0</span>
+                <span id="progress-max">0</span>
             </div>
         </div>
 
@@ -1041,7 +1066,6 @@ _DASHBOARD_HTML = """
             </div>
 
             <form onsubmit="event.preventDefault(); updateRange();" class="space-y-4">
-                <!-- Диапазон -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div>
                         <label class="block text-xs text-muted mb-1">ID от</label>
@@ -1057,40 +1081,6 @@ _DASHBOARD_HTML = """
                         <label class="block text-xs text-muted mb-1">Шаг батча</label>
                         <input type="number" id="id-step" value="1000" min="1" step="1"
                                class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
-                    </div>
-                </div>
-
-                <!-- Кулдауны и ротация -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <div>
-                        <label class="block text-xs text-muted mb-1">Кулдаун между батчами (сек)</label>
-                        <div class="flex items-center gap-2">
-                            <input type="number" id="cooldown-input" value="10" min="0" step="0.5"
-                                   class="flex-1 bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
-                            <button onclick="updateCooldown()" type="button" class="btn-press flex items-center gap-1 bg-border hover:bg-border/80 text-text px-3 py-2 rounded-lg text-xs font-medium transition-colors">
-                                <i data-lucide="check" class="w-3 h-3"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-xs text-muted mb-1">Кулдаун переключения аккаунта (сек)</label>
-                        <div class="flex items-center gap-2">
-                            <input type="number" id="reconnect-cooldown-input" value="20" min="0" step="0.5"
-                                   class="flex-1 bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
-                            <button onclick="updateReconnectCooldown()" type="button" class="btn-press flex items-center gap-1 bg-border hover:bg-border/80 text-text px-3 py-2 rounded-lg text-xs font-medium transition-colors">
-                                <i data-lucide="check" class="w-3 h-3"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-xs text-muted mb-1">Батчей с одного аккаунта</label>
-                        <div class="flex items-center gap-2">
-                            <input type="number" id="batches-per-account-input" value="3" min="1" step="1"
-                                   class="flex-1 bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
-                            <button onclick="updateBatchesPerAccount()" type="button" class="btn-press flex items-center gap-1 bg-border hover:bg-border/80 text-text px-3 py-2 rounded-lg text-xs font-medium transition-colors">
-                                <i data-lucide="check" class="w-3 h-3"></i>
-                            </button>
-                        </div>
                     </div>
                 </div>
 
@@ -1131,6 +1121,107 @@ _DASHBOARD_HTML = """
                     </button>
                 </div>
             </form>
+        </div>
+
+        <div class="bg-card border border-border rounded-xl p-5 md:p-6 mb-5 card-hover">
+            <div class="flex items-center gap-2 mb-4">
+                <i data-lucide="timer" class="w-5 h-5 text-warn"></i>
+                <span class="text-sm font-medium uppercase tracking-wider text-muted">Настройки кулдаунов</span>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                <div>
+                    <label class="block text-xs text-muted mb-1">Между батчами (сек)</label>
+                    <input type="number" id="cooldown-input" value="20" min="0" step="0.5"
+                           class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
+                </div>
+                <div>
+                    <label class="block text-xs text-muted mb-1">При переключении аккаунта (сек)</label>
+                    <input type="number" id="reconnect-cooldown-input" value="20" min="0" step="0.5"
+                           class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
+                </div>
+                <div>
+                    <label class="block text-xs text-muted mb-1">При реинициализации (сек)</label>
+                    <input type="number" id="reinit-cooldown-input" value="5" min="0" step="0.5"
+                           class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3">
+                <button onclick="updateCooldowns()" id="cooldowns-save-btn" type="button" class="btn-press flex items-center gap-2 bg-warn hover:bg-warn/80 text-bg px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                    <i data-lucide="save" class="w-4 h-4"></i>
+                    <span id="cooldowns-save-btn-text">Сохранить кулдауны</span>
+                </button>
+
+                <div class="flex items-center gap-2">
+                    <label class="text-xs text-muted">Батчей с одного аккаунта:</label>
+                    <input type="number" id="batches-per-account-input" value="3" min="1" step="1"
+                           class="w-20 bg-bg border border-border rounded-lg px-2 py-1.5 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
+                    <button onclick="updateBatchesPerAccount()" type="button" class="btn-press flex items-center gap-1 bg-border hover:bg-border/80 text-text px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
+                        <i data-lucide="check" class="w-3 h-3"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-card border border-border rounded-xl p-5 md:p-6 mb-5 card-hover">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="globe" class="w-5 h-5 text-purple"></i>
+                    <span class="text-sm font-medium uppercase tracking-wider text-muted">Настройки прокси</span>
+                </div>
+                <span id="proxy-status-badge" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-danger/15 text-danger">
+                    <span class="w-1.5 h-1.5 rounded-full bg-danger"></span>Не используется
+                </span>
+            </div>
+
+            <div class="space-y-4">
+                <div class="flex flex-wrap items-center gap-4">
+                    <label class="inline-flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="proxy-mode" id="proxy-mode-off" value="off" checked onchange="toggleProxyMode()"
+                               class="accent-accent w-4 h-4">
+                        <span class="text-sm text-text">Не использовать прокси</span>
+                    </label>
+                    <label class="inline-flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="proxy-mode" id="proxy-mode-on" value="on" onchange="toggleProxyMode()"
+                               class="accent-accent w-4 h-4">
+                        <span class="text-sm text-text">Использовать SOCKS прокси</span>
+                    </label>
+                </div>
+
+                <div id="proxy-url-row" class="hidden">
+                    <label class="block text-xs text-muted mb-1">URL SOCKS прокси</label>
+                    <input type="text" id="proxy-url-input" placeholder="socks5://user:pass@host:port"
+                           class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono-nums">
+                    <p class="text-xs text-muted mt-1">Поддерживаются socks4://, socks5://, socks5h://</p>
+                </div>
+
+                <div id="proxy-results" class="hidden bg-bg border border-border rounded-lg p-3">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs text-muted">Пинг до прокси</span>
+                            <span id="proxy-ping" class="text-sm font-mono-nums font-medium text-text">—</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs text-muted">Пинг до WS через прокси</span>
+                            <span id="ws-ping" class="text-sm font-mono-nums font-medium text-text">—</span>
+                        </div>
+                    </div>
+                    <p id="proxy-test-error" class="text-xs text-danger mt-2 hidden"></p>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-3">
+                    <button onclick="testProxy()" id="proxy-test-btn" type="button" class="btn-press flex items-center gap-2 bg-purple hover:bg-purple/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                        <i data-lucide="activity" class="w-4 h-4"></i>
+                        <span id="proxy-test-btn-text">Проверить прокси</span>
+                    </button>
+
+                    <button onclick="saveProxy()" id="proxy-save-btn" type="button" class="btn-press flex items-center gap-2 bg-success hover:bg-success/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                        <i data-lucide="save" class="w-4 h-4"></i>
+                        <span id="proxy-save-btn-text">Сохранить прокси</span>
+                    </button>
+                </div>
+            </div>
         </div>
 
         <div class="bg-card border border-border rounded-xl p-5 md:p-6 mb-5 card-hover">
@@ -1364,10 +1455,12 @@ _DASHBOARD_HTML = """
                 if (progressText) progressText.textContent = (d.progress_percent || 0) + '%';
                 if (progressBar) progressBar.style.width = (d.progress_percent || 0) + '%';
 
-                const currentIdEl = document.getElementById('current-id');
-                const idMaxEl = document.getElementById('id-max');
-                if (currentIdEl) currentIdEl.textContent = fmtNum(d.current_id || 0);
-                if (idMaxEl) idMaxEl.textContent = fmtNum(d.id_max || 0);
+                const progressMinEl = document.getElementById('progress-min');
+                const progressCurrentEl = document.getElementById('progress-current');
+                const progressMaxEl = document.getElementById('progress-max');
+                if (progressMinEl) progressMinEl.textContent = fmtNum(d.id_min || 0);
+                if (progressCurrentEl) progressCurrentEl.textContent = fmtNum(d.current_id || 0);
+                if (progressMaxEl) progressMaxEl.textContent = fmtNum(d.id_max || 0);
 
                 const etaEl = document.getElementById('eta');
                 const elapsedEl = document.getElementById('elapsed');
@@ -1419,8 +1512,12 @@ _DASHBOARD_HTML = """
 
                 const cooldownInput = document.getElementById('cooldown-input');
                 const reconnectInput = document.getElementById('reconnect-cooldown-input');
-                if (cooldownInput && !cooldownInput.matches(':focus')) cooldownInput.value = d.cooldown_seconds || 20;
-                if (reconnectInput && !reconnectInput.matches(':focus')) reconnectInput.value = d.reconnect_cooldown_seconds || 20;
+                const reinitInput = document.getElementById('reinit-cooldown-input');
+                if (cooldownInput && !cooldownInput.matches(':focus')) cooldownInput.value = d.cooldown_seconds ?? 20;
+                if (reconnectInput && !reconnectInput.matches(':focus')) reconnectInput.value = d.reconnect_cooldown_seconds ?? 20;
+                if (reinitInput && !reinitInput.matches(':focus')) reinitInput.value = d.reinit_cooldown_seconds ?? 5;
+
+                renderProxyState(d);
 
                 const pauseBtn = document.getElementById('pause-btn');
                 const pauseSpan = pauseBtn?.querySelector('span');
@@ -1538,24 +1635,144 @@ _DASHBOARD_HTML = """
             if (actionCard) actionCard.classList.add('hidden');
         };
 
-        async function updateCooldown() {
-            const val = parseFloat(document.getElementById('cooldown-input').value);
-            if (isNaN(val) || val < 0) return;
-            await fetch('/api/cooldown', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({seconds: val})
-            });
+        function renderProxyState(d) {
+            const offRadio = document.getElementById('proxy-mode-off');
+            const onRadio = document.getElementById('proxy-mode-on');
+            const urlRow = document.getElementById('proxy-url-row');
+            const urlInput = document.getElementById('proxy-url-input');
+            const badge = document.getElementById('proxy-status-badge');
+            const enabled = d.proxy_enabled && d.proxy_url;
+            if (offRadio) offRadio.checked = !enabled;
+            if (onRadio) onRadio.checked = !!enabled;
+            if (urlRow) urlRow.classList.toggle('hidden', !enabled && !(onRadio?.checked));
+            if (urlInput && !urlInput.matches(':focus') && d.proxy_url) urlInput.value = d.proxy_url;
+            if (badge) {
+                if (enabled) {
+                    badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-success/15 text-success';
+                    badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-success animate-pulse"></span>Активен';
+                } else {
+                    badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-danger/15 text-danger';
+                    badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-danger"></span>Не используется';
+                }
+            }
         }
 
-        async function updateReconnectCooldown() {
-            const val = parseFloat(document.getElementById('reconnect-cooldown-input').value);
-            if (isNaN(val) || val < 0) return;
-            await fetch('/api/reconnect-cooldown', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({seconds: val})
-            });
+        function toggleProxyMode() {
+            const on = document.getElementById('proxy-mode-on')?.checked;
+            document.getElementById('proxy-url-row')?.classList.toggle('hidden', !on);
+        }
+
+        function getProxyFormState() {
+            const enabled = document.getElementById('proxy-mode-on')?.checked;
+            const url = document.getElementById('proxy-url-input')?.value?.trim() || '';
+            return { enabled, url };
+        }
+
+        function showProxyTestResult({ok, proxy_ping_ms, ws_ping_ms, error}) {
+            const results = document.getElementById('proxy-results');
+            const proxyPing = document.getElementById('proxy-ping');
+            const wsPing = document.getElementById('ws-ping');
+            const errEl = document.getElementById('proxy-test-error');
+            if (results) results.classList.remove('hidden');
+            if (proxyPing) proxyPing.textContent = proxy_ping_ms != null ? proxy_ping_ms + ' мс' : '—';
+            if (wsPing) wsPing.textContent = ws_ping_ms != null ? ws_ping_ms + ' мс' : '—';
+            if (errEl) {
+                if (error) {
+                    errEl.textContent = error;
+                    errEl.classList.remove('hidden');
+                } else {
+                    errEl.classList.add('hidden');
+                }
+            }
+        }
+
+        async function testProxy() {
+            const { enabled, url } = getProxyFormState();
+            if (!enabled || !url) {
+                alert('Включите режим «Использовать SOCKS прокси» и введите URL');
+                return;
+            }
+            const btn = document.getElementById('proxy-test-btn');
+            const btnText = document.getElementById('proxy-test-btn-text');
+            if (btn) btn.disabled = true;
+            if (btnText) btnText.textContent = 'Проверка...';
+            try {
+                const res = await fetch('/api/proxy/test', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({proxy_url: url})
+                });
+                const data = await res.json();
+                showProxyTestResult(data);
+                if (!data.ok) alert(data.error || 'Проверка не пройдена');
+            } catch (err) {
+                showProxyTestResult({ok: false, error: 'Ошибка сети: ' + err.message});
+            } finally {
+                if (btnText) btnText.textContent = 'Проверить прокси';
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        async function saveProxy() {
+            const { enabled, url } = getProxyFormState();
+            const btn = document.getElementById('proxy-save-btn');
+            const btnText = document.getElementById('proxy-save-btn-text');
+            if (btn) btn.disabled = true;
+            if (btnText) btnText.textContent = 'Сохранение...';
+            try {
+                const res = await fetch('/api/proxy', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({proxy_enabled: enabled, proxy_url: url})
+                });
+                const data = await res.json();
+                if (!data.ok) alert(data.error || 'Ошибка сохранения');
+                if (btnText) btnText.textContent = data.ok ? 'Сохранено!' : 'Ошибка';
+                if (data.ok) {
+                    showProxyTestResult({ok: true});
+                    document.getElementById('proxy-results')?.classList.add('hidden');
+                }
+            } catch (err) {
+                if (btnText) btnText.textContent = 'Ошибка';
+            }
+            setTimeout(() => {
+                if (btnText) btnText.textContent = 'Сохранить прокси';
+                if (btn) btn.disabled = false;
+            }, 2000);
+        }
+
+        async function updateCooldowns() {
+            const cooldown = parseFloat(document.getElementById('cooldown-input').value);
+            const reconnect = parseFloat(document.getElementById('reconnect-cooldown-input').value);
+            const reinit = parseFloat(document.getElementById('reinit-cooldown-input').value);
+            if (isNaN(cooldown) || cooldown < 0 || isNaN(reconnect) || reconnect < 0 || isNaN(reinit) || reinit < 0) {
+                alert('Все кулдауны должны быть числами ≥ 0');
+                return;
+            }
+            const btn = document.getElementById('cooldowns-save-btn');
+            const btnText = document.getElementById('cooldowns-save-btn-text');
+            if (btn) btn.disabled = true;
+            if (btnText) btnText.textContent = 'Сохранение...';
+            try {
+                const res = await fetch('/api/cooldowns', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        cooldown_seconds: cooldown,
+                        reconnect_cooldown_seconds: reconnect,
+                        reinit_cooldown_seconds: reinit
+                    })
+                });
+                const data = await res.json();
+                if (!data.ok) alert(data.error || 'Ошибка');
+                if (btnText) btnText.textContent = data.ok ? 'Сохранено!' : 'Ошибка';
+            } catch {
+                if (btnText) btnText.textContent = 'Ошибка';
+            }
+            setTimeout(() => {
+                if (btnText) btnText.textContent = 'Сохранить кулдауны';
+                if (btn) btn.disabled = false;
+            }, 2000);
         }
 
         async function togglePause() {
@@ -1965,12 +2182,181 @@ async def _handle_reconnect_cooldown(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": str(exc)}, status=400)
 
 
+async def _handle_reinit_cooldown(request: web.Request) -> web.Response:
+    state: ScrapingState = request.app["state"]
+    account_manager: AccountManager = request.app["account_manager"]
+    try:
+        data = await request.json()
+        seconds = float(data.get("seconds", 5))
+        state.reinit_cooldown_seconds = max(0, seconds)
+        account_manager.save(state)
+        logger.info("Reinit cooldown updated to %.1f seconds", state.reinit_cooldown_seconds)
+        await _broadcast_state(state)
+        return web.json_response({"ok": True, "reinit_cooldown": state.reinit_cooldown_seconds})
+    except Exception as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+
+async def _handle_cooldowns(request: web.Request) -> web.Response:
+    state: ScrapingState = request.app["state"]
+    account_manager: AccountManager = request.app["account_manager"]
+    try:
+        data = await request.json()
+        cooldown = data.get("cooldown_seconds")
+        reconnect = data.get("reconnect_cooldown_seconds")
+        reinit = data.get("reinit_cooldown_seconds")
+        if cooldown is not None:
+            state.cooldown_seconds = max(0, float(cooldown))
+        if reconnect is not None:
+            state.reconnect_cooldown_seconds = max(0, float(reconnect))
+        if reinit is not None:
+            state.reinit_cooldown_seconds = max(0, float(reinit))
+        account_manager.save(state)
+        logger.info(
+            "Cooldowns updated: batch=%.1f reconnect=%.1f reinit=%.1f",
+            state.cooldown_seconds,
+            state.reconnect_cooldown_seconds,
+            state.reinit_cooldown_seconds,
+        )
+        await _broadcast_state(state)
+        return web.json_response({
+            "ok": True,
+            "cooldown_seconds": state.cooldown_seconds,
+            "reconnect_cooldown_seconds": state.reconnect_cooldown_seconds,
+            "reinit_cooldown_seconds": state.reinit_cooldown_seconds,
+        })
+    except Exception as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+
+
 async def _handle_pause(request: web.Request) -> web.Response:
     state: ScrapingState = request.app["state"]
     state.is_paused = not state.is_paused
     logger.info("Scraper %s", "paused" if state.is_paused else "resumed")
     await _broadcast_state(state)
     return web.json_response({"ok": True, "paused": state.is_paused})
+
+
+_SOCKS_SCHEME_RE = re.compile(r"^(socks4|socks5|socks5h)://", re.IGNORECASE)
+
+
+def _parse_socks_url(url: str) -> tuple[str, int]:
+    """Extract host and port from a SOCKS URL for TCP ping."""
+    parsed = urlsplit(url)
+    host = parsed.hostname
+    port = parsed.port
+    if not host or not port:
+        raise ValueError("Не удалось определить хост или порт прокси")
+    return host, port
+
+
+async def _ping_proxy_host(proxy_url: str, timeout: float = 10.0) -> tuple[bool, float, Optional[str]]:
+    """TCP-connect to the proxy host:port and return (ok, ms, error)."""
+    try:
+        host, port = _parse_socks_url(proxy_url)
+        start = time.time()
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port),
+            timeout=timeout,
+        )
+        elapsed = (time.time() - start) * 1000
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return True, round(elapsed, 1), None
+    except Exception as exc:
+        return False, 0.0, f"Прокси недоступен: {exc}"
+
+
+async def _ping_ws_through_proxy(proxy_url: str, timeout: float = 20.0) -> tuple[bool, float, Optional[str]]:
+    """Connect to oneme WS through the proxy and return (ok, ms, error)."""
+    cl = Tuiclient()
+    cl.proxy = proxy_url
+    start = time.time()
+    try:
+        await asyncio.wait_for(cl._netw_connect(), timeout=timeout)
+        elapsed = (time.time() - start) * 1000
+        try:
+            await cl.disconnect()
+        except Exception:
+            pass
+        return True, round(elapsed, 1), None
+    except Exception as exc:
+        return False, 0.0, f"WS через прокси недоступен: {exc}"
+
+
+async def _handle_proxy_get(request: web.Request) -> web.Response:
+    state: ScrapingState = request.app["state"]
+    return web.json_response({
+        "ok": True,
+        "proxy_url": state.proxy_url,
+        "proxy_enabled": state.proxy_enabled,
+    })
+
+
+async def _handle_proxy_test(request: web.Request) -> web.Response:
+    try:
+        data = await request.json()
+        proxy_url = (data.get("proxy_url") or "").strip()
+        if not proxy_url:
+            return web.json_response({"ok": False, "error": "Введите URL прокси"}, status=400)
+        if not _SOCKS_SCHEME_RE.match(proxy_url):
+            return web.json_response(
+                {"ok": False, "error": "URL должен начинаться с socks4://, socks5:// или socks5h://"},
+                status=400,
+            )
+
+        proxy_ok, proxy_ms, proxy_error = await _ping_proxy_host(proxy_url)
+        if not proxy_ok:
+            return web.json_response({"ok": False, "proxy_ping_ms": None, "ws_ping_ms": None, "error": proxy_error})
+
+        ws_ok, ws_ms, ws_error = await _ping_ws_through_proxy(proxy_url)
+        if not ws_ok:
+            return web.json_response({"ok": False, "proxy_ping_ms": proxy_ms, "ws_ping_ms": None, "error": ws_error})
+
+        return web.json_response({
+            "ok": True,
+            "proxy_ping_ms": proxy_ms,
+            "ws_ping_ms": ws_ms,
+        })
+    except Exception as exc:
+        logger.exception("Proxy test failed")
+        return web.json_response({"ok": False, "error": str(exc)}, status=500)
+
+
+async def _handle_proxy_set(request: web.Request) -> web.Response:
+    state: ScrapingState = request.app["state"]
+    account_manager: AccountManager = request.app["account_manager"]
+    try:
+        data = await request.json()
+        enabled = bool(data.get("proxy_enabled", False))
+        url = (data.get("proxy_url") or "").strip()
+
+        if enabled:
+            if not url:
+                return web.json_response({"ok": False, "error": "Введите URL прокси"}, status=400)
+            if not _SOCKS_SCHEME_RE.match(url):
+                return web.json_response(
+                    {"ok": False, "error": "URL должен начинаться с socks4://, socks5:// или socks5h://"},
+                    status=400,
+                )
+
+        state.proxy_enabled = enabled
+        state.proxy_url = url if enabled else None
+        account_manager.proxy_url = state.proxy_url
+        account_manager.save(state)
+        logger.info("Proxy updated: enabled=%s url=%s", enabled, state.proxy_url)
+        await _broadcast_state(state)
+        return web.json_response({
+            "ok": True,
+            "proxy_enabled": state.proxy_enabled,
+            "proxy_url": state.proxy_url,
+        })
+    except Exception as exc:
+        logger.exception("Proxy set failed")
+        return web.json_response({"ok": False, "error": str(exc)}, status=500)
 
 
 async def _handle_save(request: web.Request) -> web.Response:
@@ -2208,6 +2594,7 @@ async def _phone_auth_waiter(account_manager: AccountManager, state: ScrapingSta
 
     await account_manager.stop_captcha_solver()
     cl = Tuiclient()
+    cl.proxy = account_manager.proxy_url
     try:
         await cl._netw_connect()
         auth_token = await cl.send_verify_code(pending["phone"], token)
@@ -2245,6 +2632,7 @@ async def _handle_phone_init(request: web.Request) -> web.Response:
             return web.json_response({"ok": False, "error": "Уже идёт процесс входа"}, status=409)
 
         cl = Tuiclient()
+        cl.proxy = account_manager.proxy_url
         captcha_url = ""
         try:
             await cl._netw_connect()
@@ -2301,6 +2689,7 @@ async def _handle_phone_verify(request: web.Request) -> web.Response:
             return web.json_response({"ok": False, "error": "Сначала запросите код"}, status=400)
 
         cl = Tuiclient()
+        cl.proxy = account_manager.proxy_url
         try:
             await cl._netw_connect()
             login_token = await cl.check_verify_code(pending["auth_token"], code)
@@ -2349,6 +2738,8 @@ def create_app(state: ScrapingState) -> web.Application:
     app.router.add_get("/ws", _handle_ws)
     app.router.add_post("/api/cooldown", _handle_cooldown)
     app.router.add_post("/api/reconnect-cooldown", _handle_reconnect_cooldown)
+    app.router.add_post("/api/reinit-cooldown", _handle_reinit_cooldown)
+    app.router.add_post("/api/cooldowns", _handle_cooldowns)
     app.router.add_post("/api/batches-per-account", _handle_batches_per_account)
     app.router.add_post("/api/pause", _handle_pause)
     app.router.add_post("/api/save", _handle_save)
@@ -2357,6 +2748,9 @@ def create_app(state: ScrapingState) -> web.Application:
     app.router.add_post("/api/range", _handle_range)
     app.router.add_post("/api/restart", _handle_restart)
     app.router.add_get("/api/download", _handle_download)
+    app.router.add_get("/api/proxy", _handle_proxy_get)
+    app.router.add_post("/api/proxy/test", _handle_proxy_test)
+    app.router.add_post("/api/proxy", _handle_proxy_set)
     app.router.add_get("/api/accounts", _handle_accounts)
     app.router.add_post("/api/accounts", _handle_add_token)
     app.router.add_post("/api/accounts/{idx}/check", _handle_check_account)
@@ -2386,9 +2780,13 @@ async def main() -> None:
         id_step=account_manager.loaded_settings.get("id_step", 1000),
         cooldown_seconds=account_manager.loaded_settings.get("cooldown_seconds", 20.0),
         reconnect_cooldown_seconds=account_manager.loaded_settings.get("reconnect_cooldown_seconds", 20.0),
+        reinit_cooldown_seconds=account_manager.loaded_settings.get("reinit_cooldown_seconds", 5.0),
         batches_per_account=account_manager.loaded_settings.get("batches_per_account", 3),
+        proxy_url=account_manager.loaded_settings.get("proxy_url"),
+        proxy_enabled=account_manager.loaded_settings.get("proxy_enabled", False),
     )
     state.account_manager = account_manager
+    account_manager.proxy_url = state.proxy_url if state.proxy_enabled else None
 
     app = create_app(state)
 
