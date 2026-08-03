@@ -14,7 +14,7 @@ from operator import itemgetter
 from datetime import datetime
 from enum import IntEnum
 
-from classes import BeginCallResp, Chat, IncomingCall, UserProfile, Message, VideoUrls, NewMsgEvent
+from classes import BeginCallResp, Chat, IncomingCall, QrAuthResp, UserProfile, Message, VideoUrls, NewMsgEvent
 from convert import PacketCodec
 import payloads as pl
 from tools import UniversalEncoder
@@ -41,6 +41,7 @@ class Opcodes(IntEnum):
     GET_CAPTCHA = 224
     AUTHENTICATE = 19
     LOGOUT = 20
+    CHANGE_NAME = 16
 
     SEARCH = 60
     SEARCH_BY_NUMBER = 46
@@ -57,6 +58,9 @@ class Opcodes(IntEnum):
     INCOMING_CALL = 137
     INCOMING_MSG_EVENT = 128
     BEGIN_CALL = 78
+
+    QR_AUTH_GETID = 288
+    QR_AUTH_POLL = 289
 
 def _save_json(file: str, data) -> None:
     with open(file, "w", encoding="utf-8") as f:
@@ -207,8 +211,10 @@ class NetworkMixin:
 
     async def search(self, query: str, count: int = 40) -> list[Chat]:
         response = await self.request(Opcodes.SEARCH, {'query': query, 'count': count })
-        adapter = TypeAdapter(list[Chat])
-        return adapter.validate_python(map(itemgetter("chat"), response["payload"]["result"]))
+        if response["cmd"] == 1:
+            adapter = TypeAdapter(list[Chat])
+            return adapter.validate_python(map(itemgetter("chat"), response["payload"]["result"]))
+        raise ServerError.from_payload(response["payload"])
 
     async def search_number(self, query: str) -> UserProfile | None:
         response = await self.request(Opcodes.SEARCH_BY_NUMBER, {'phone': query })
@@ -225,17 +231,22 @@ class NetworkMixin:
 
     async def get_messages(self, chatID: int, dFrom: datetime = datetime.now(), backward: int = 100, forward: int = 100) -> List[Message]:
         response = await self.request(Opcodes.GET_MESSAGES, {'chatId': chatID, 'from': int(dFrom.timestamp() * 1000), 'forward': forward, 'backward': backward, 'getMessages': True})
-        adapter = TypeAdapter(List[Message])
-        return adapter.validate_python(response["payload"]["messages"])
+        if response["cmd"] == 1:
+            adapter = TypeAdapter(List[Message])
+            return adapter.validate_python(response["payload"]["messages"])
+        raise ServerError.from_payload(response["payload"])
 
     async def get_file_url(self, fileId: int, chatId: int, messageId: int) -> str:
         response = await self.request(Opcodes.GET_FILE_URL, {'fileId': fileId, 'chatId': chatId, 'messageId': messageId})
-        return response["payload"]["url"]
+        if response["cmd"] == 1:
+            return response["payload"]["url"]
+        raise ServerError.from_payload(response["payload"])
 
     async def get_video_urls(self, videoId: int, token: str, chatId: int, messageId: int) -> VideoUrls:
-        await self._send(Opcodes.GET_VIDEO_URLS, {'videoId': videoId, 'token': token, 'chatId': chatId, 'messageId': messageId})
-        response = await self.wait_for_opcode(Opcodes.GET_VIDEO_URLS)
-        return VideoUrls.model_validate(response["payload"])
+        response = await self.request(Opcodes.GET_VIDEO_URLS, {'videoId': videoId, 'token': token, 'chatId': chatId, 'messageId': messageId})
+        if response["cmd"] == 1:
+            return VideoUrls.model_validate(response["payload"])
+        raise ServerError.from_payload(response["payload"])
 
     async def send_message(self, chatId: int, text: str, notify: bool = True) -> Message:
         cid = -(time.time_ns() // 1_000_000)
@@ -300,7 +311,31 @@ class NetworkMixin:
             return BeginCallResp.model_validate(response["payload"])
         raise ServerError.from_payload(response["payload"])
 
+    async def qr_auth_getid(self) -> QrAuthResp:
+        response = await self.request(Opcodes.QR_AUTH_GETID, { })
+        if response["cmd"] == 1:
+            return QrAuthResp.model_validate(response["payload"])
+        raise ServerError.from_payload(response["payload"])
 
+    async def qr_auth_poll(self, trackId: str):
+        response = await self.request(Opcodes.QR_AUTH_POLL, { "trackId" : trackId })
+        if response["cmd"] == 1:
+            return QrAuthResp.model_validate(response["payload"]) # norm parser must be here
+        raise ServerError.from_payload(response["payload"])
+
+    async def create_chat(self, title: str, userIds: List[int], notify: bool = True) -> Chat:
+        cid = -(time.time_ns() // 1_000_000)
+        response = await self.request(Opcodes.SEND_MESAGE, {'message': {'cid': cid, 'attaches': [{'_type': 'CONTROL', 'event': 'new', 'chatType': 'CHAT', 'title': title, 'userIds': userIds}]}, 'notify': notify})
+        if response["cmd"] == 1:
+            return Chat.model_validate(response["payload"]["chat"])
+        raise ServerError.from_payload(response["payload"])
+
+    async def change_name(self, firstName: str, lastName: str = '') -> UserProfile:
+        response = await self.request(Opcodes.CHANGE_NAME, {'firstName': firstName, 'lastName': lastName})
+        open("src/w3.json", "w").write(json.dumps(response, cls=UniversalEncoder, indent=2))
+        if response["cmd"] == 1:
+            return UserProfile.model_validate(response["payload"]["profile"]["contact"])
+        raise ServerError.from_payload(response["payload"])
 
 # open("src/w3.json", "w").write(json.dumps(response, cls=UniversalEncoder, indent=2))
 

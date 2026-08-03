@@ -305,7 +305,7 @@ class Tuiclient(Client):
         await self.select_account()
         while True:
             print(f"[{self.profile.id}] {self.profile.get_name()}")
-            match await sel_str(["Profile info", "Contacts", "Chats list", "Limits and config", "User infos", "Swap account", "Delete account", "Logout", "Exit"], "Main menu"):
+            match await sel_str(["Profile info", "Contacts", "Chats list", "Limits and config", "User infos", "Change name", "Swap account", "Delete account", "Logout", "Exit"], "Main menu"):
                 case "Profile info":
                     self.profile.info()
                 case "Contacts":
@@ -345,6 +345,9 @@ class Tuiclient(Client):
                             self.users_by_id[user_id].info()
                         case "Back":
                             pass
+                case "Change name":
+                    name = await ask("name ->")
+                    self.profile = await self.change_name(name)
                 case "Delete account":
                     if await ask_exact(f"Are u sure u want to delete account {self.profile.get_name()}? ->"):
                         await self.delete_account()

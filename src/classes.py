@@ -378,3 +378,10 @@ class BeginCallResp(BaseModel):
     conversationId: str
     internalCallerParams: Json[CallInternalParams]
     rejectedParticipants: List[int]
+
+class QrAuthResp(BaseModel):
+    trackId: str
+    qrLink: str
+    expiresAt: MSKTimestamp
+    pollingInterval: int
+    ttl: int

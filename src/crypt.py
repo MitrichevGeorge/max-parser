@@ -335,7 +335,6 @@ class ClientVault:
                 data = self.vault.open(password)
                 self._password = password
                 self.tokens = data.tokens
-                print(self.tokens)
                 return
             except InvalidPasswordError as err:
                 print(err)

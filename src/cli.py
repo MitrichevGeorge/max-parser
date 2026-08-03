@@ -76,6 +76,7 @@ async def main():
     with patch_stdout(raw=True):
         q = Tuiclient()
         await q.begin()
+        await q._netw_connect()
 
         print("Enter commands as: [opcode] [json dict]")
         print("Examples: 49 {\"chatId\": 123}   or   GET_MESSAGES {\"chatId\": 123}")
