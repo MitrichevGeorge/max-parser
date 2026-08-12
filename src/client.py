@@ -1,5 +1,8 @@
 import asyncio
 import datetime
+import json
+
+from network_core import NetworkCoreMobile, NetworkCoreWS
 
 try:
     loop = asyncio.get_running_loop()
@@ -9,14 +12,13 @@ except RuntimeError:
 
 
 from classes import Attach, AttachType, ConfigContainer, FileAttach, IncomingCall, Message, UserProfile, Chat, ServerData, VideoAttach, NewMsgEvent
-import payloads as pl
 from typing import Any, Dict, List, NoReturn
 from operator import itemgetter
 from loguru import logger
 import sys
-from network import NetworkMixin, ServerError, WrongPhoneError
+from network_api import NetworkMixin, ServerError, WrongPhoneError
 import captcha
-from tools import RussianPhoneValidator, any_without, ask_exact, read_number, ask, sel, sel_str, bye
+from tools import RussianPhoneValidator, any_without, ask_exact, read_number, ask, sel, sel_str, bye, UniversalEncoder
 from crypt import ClientVault, InvalidPasswordError, TokenModel
 from pathlib import Path
 from logserver import LOGS_PORT
@@ -67,6 +69,17 @@ class Client(NetworkMixin):
         await self.update_missing_users([user_id])
         return self.users_by_id[user_id]
 
+    async def get_chat_name(self, chat: Chat) -> str:
+        if chat.id == 0:
+            return "Saved messages"
+        elif chat.type == "DIALOG" and chat.participants:
+            user = self.users_by_id.get(any_without(chat.participants, self.profile.id))
+            return user.get_name() if user else "Unknown"
+        elif chat.title:
+            return chat.title
+        else:
+            raise ValueError(f"Missing title for chat ID {chat.id}")
+
     async def norm_chatlist(self, new_type: bool = False) -> list[str | tuple[int, str, int]]:
         chat_to_user = {
             chat.id: any_without(chat.participants, self.profile.id)
@@ -104,12 +117,13 @@ class Client(NetworkMixin):
         return ""
 
     async def message_info(self, message: Message, chatId: int, tab: int = 0, ask: bool = True):
-        await self.update_missing_users([message.sender])
+        if message.sender:
+            await self.update_missing_users([message.sender])
         indent = "│" * tab
         child_indent = "│" * (tab + 1)
         print(f'{indent}┌{"─"*4} {message.time.strftime("%d.%m.%Y %H:%M:%S")} {message.link.type if message.link else ""}')
         print(f'{child_indent}ID: {message.id}')
-        print(f'{child_indent}Sender: [{message.sender}] {self.users_by_id[message.sender].get_name()}')
+        print(f'{child_indent}Sender: [{message.sender}] {self.users_by_id[message.sender].get_name() if message.sender else "Unknown"}')
         print(f'{child_indent}Text: {message.text.replace("\n", "\n"+"│"*(tab+2))}')
         print(f'{child_indent}Attaches: { [' '.join((i.info(), await self.get_attach_info(i, chatId, message.id))) for i in message.attaches] }')
         print(f'{child_indent}ReactionInfo: {message.reactionInfo}')
@@ -127,11 +141,14 @@ class Client(NetworkMixin):
         chat.update_messages()
 
         unique_users = list(set(chat.participants) | {msg.sender for msg in chat.messages})
-        await self.update_missing_users(unique_users)
+        print(unique_users)
+        if isinstance(unique_users, List[int]):
+            await self.update_missing_users(unique_users)
+        print(self.users_by_id)
 
         result: list[tuple[int, str, int]] = []
         for index, message in enumerate(chat.messages):
-            sender_name = self.users_by_id[message.sender].get_name()
+            sender_name = self.users_by_id[message.sender].get_name() if message.sender else "Unknown"
             date_str = message.time.strftime("%d.%m.%Y %H:%M:%S")
             attach_str = f" [{len(message.attaches)} attaches]" if message.attaches else ""
             result.append((index, f"[{date_str}] {sender_name}: {message.text}{attach_str}", message.id))
@@ -174,21 +191,34 @@ class Tuiclient(Client):
 
     async def _auth_by_phone(self) -> str:
         phone_number = await ask("phone number ->", validator=RussianPhoneValidator())
-
-        while True:
-            captcha_url = await self.get_captcha_url(phone_number)
-            try:
-                captcha_token = await captcha.solve(captcha_url)
-                await self.disconnect()
-                await self._netw_connect()
-                auth_token = await self.send_verify_code(phone_number, captcha_token)
-                break
-            except WrongPhoneError as err:
-                print(err)
-                phone_number = await ask("phone number ->", validator=RussianPhoneValidator())
-            except ServerError as err:
-                print(err)
-                bye()
+        if isinstance(self, NetworkCoreMobile):
+            while True:
+                try:
+                    # await self.disconnect()
+                    # await self._netw_connect()
+                    auth_token = await self.send_verify_code(phone_number)
+                    break
+                except WrongPhoneError as err:
+                    print(err)
+                    phone_number = await ask("phone number ->", validator=RussianPhoneValidator())
+                except ServerError as err:
+                    print(err)
+                    bye()
+        else:
+            while True:
+                captcha_url = await self.get_captcha_url(phone_number)
+                try:
+                    captcha_token = await captcha.solve(captcha_url)
+                    await self.disconnect()
+                    await self._netw_connect()
+                    auth_token = await self.send_verify_code(phone_number, captcha_token)
+                    break
+                except WrongPhoneError as err:
+                    print(err)
+                    phone_number = await ask("phone number ->", validator=RussianPhoneValidator())
+                except ServerError as err:
+                    print(err)
+                    bye()
 
         while True:
             try:
@@ -210,7 +240,7 @@ class Tuiclient(Client):
             tokens = self.vault.tokens
             options = [*map(self._format_token_variant, tokens), "Enter token", "Auth by number"]
             
-            selection_idx = await sel(options)
+            selection_idx = await sel(options, "Accounts")
 
             is_existing_token = selection_idx < len(tokens)
             if is_existing_token:
@@ -247,7 +277,7 @@ class Tuiclient(Client):
         print("Chats:")
         norm_chatlist = await self.norm_chatlist(new_type=True)
         while True:
-            select = await sel(list(map(itemgetter(1), norm_chatlist))+["Back"], "Chats")
+            select = await sel(list(map(itemgetter(1), norm_chatlist))+["Back"], "Main menu -> Chats")
             if select >= len(norm_chatlist):
                 return
             
@@ -260,7 +290,7 @@ class Tuiclient(Client):
             
             while True:
                 options = list(map(itemgetter(1), norm_chat)) + ["Send message", "Call", "Back", "Main menu", "Delete chat"]
-                select = await sel(options, "Messages")
+                select = await sel(options, f"Main menu -> Chats -> {self.get_chat_name(chat)}")
 
                 if select < len(norm_chat):
                     msg_id = norm_chat[select][2]
@@ -300,12 +330,20 @@ class Tuiclient(Client):
         self.vault = ClientVault()
         await self.vault.init()
         await self._init_log()
+        # Какое транспортное ядро унаследовано: Mobile (raw TLS api2.oneme.ru)
+        # или Web (WebSocket api.oneme.ru).
+        if isinstance(self, NetworkCoreMobile):
+            print("Network core: Mobile")
+        elif isinstance(self, NetworkCoreWS):
+            print("Network core: Web")
+        else:
+            print("Network core: unknown")
 
     async def main_menu(self):
         await self.select_account()
         while True:
             print(f"[{self.profile.id}] {self.profile.get_name()}")
-            match await sel_str(["Profile info", "Contacts", "Chats list", "Limits and config", "User infos", "Change name", "Swap account", "Delete account", "Logout", "Exit"], "Main menu"):
+            match await sel_str(["Profile info", "Contacts", "Chats list", "Limits and config", "User infos", "Swap account", "Account settings", "Logout", "Exit"], "Main menu"):
                 case "Profile info":
                     self.profile.info()
                 case "Contacts":
@@ -316,7 +354,7 @@ class Tuiclient(Client):
                 case "Limits and config":
                     self.config.server.info()
                 case "User infos":
-                    match await sel_str(["Search chats", "Search by number", "Get user by id", "Back"]):
+                    match await sel_str(["Search chats", "Search by number", "Get user by id", "Back"], "Main menu -> User infos"):
                         case "Search chats":
                             query = await ask("query ->")
                             result = await self.search(query)
@@ -345,12 +383,47 @@ class Tuiclient(Client):
                             self.users_by_id[user_id].info()
                         case "Back":
                             pass
-                case "Change name":
-                    name = await ask("name ->")
-                    self.profile = await self.change_name(name)
-                case "Delete account":
-                    if await ask_exact(f"Are u sure u want to delete account {self.profile.get_name()}? ->"):
-                        await self.delete_account()
+                case "Account settings":
+                    match await sel_str(["Change name", "Get new token", "Delete account", "Back"], "Main menu -> Account settings"):
+                        case "Change name":
+                            name = await ask("name ->")
+                            self.profile = await self.change_name(name)
+                        case "Delete account":
+                            if await ask_exact(f"Are u sure u want to delete account {self.profile.get_name()}? ->"):
+                                await self.delete_account()
+                        case "Get new token":
+                            match await sel_str(["Get QR (new session)", "Approve link", "Back"], "Main menu -> Account settings -> Get new token"):
+                                case "Get QR (new session)":
+                                    account = Client()
+                                    await account._netw_connect()
+                                    req = await account.qr_auth_getid()
+                                    print(f"QR link: {req.qrLink}")
+                                    print(f"trackId: {req.trackId}")
+                                    print("Approve it (from phone или пунктом 'Approve link'), затем жми Enter.")
+                                    await ask("Press Enter to poll ->")
+                                    try:
+                                        result = await account.qr_auth_poll(req.trackId)
+                                        print("Poll result:")
+                                        print(json.dumps(result, cls=UniversalEncoder, indent=2, ensure_ascii=False))
+                                        token_attrs = result.get("tokenAttrs") if isinstance(result, dict) else None
+                                        if isinstance(token_attrs, dict):
+                                            login = token_attrs.get("LOGIN")
+                                            new_token = login.get("token") if isinstance(login, dict) else None
+                                            if new_token:
+                                                print(f"New token: {new_token}")
+                                    except ServerError as err:
+                                        print(err)
+                                case "Approve link":
+                                    qr_link = await ask("qr link ->")
+                                    try:
+                                        await self.qr_auth_approve(qr_link)
+                                        print("approved")
+                                    except ServerError as err:
+                                        print(err)
+                                case "Back":
+                                    pass
+                        case "Back":
+                            pass
                 case "Swap account":
                     await self.select_account()
                 case "Logout":
@@ -364,7 +437,7 @@ class Tuiclient(Client):
     async def disconnect(self):
         if self.connection:
             await self.connection.close()
-            print(f"Connection to {pl.URL} closed")
+            print(f"Connection to {self.url} closed")
         if self._token_idx is not None:
             self.vault.tokens[self._token_idx].last_visit_at = datetime.now()
             self.vault.save()

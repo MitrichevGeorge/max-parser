@@ -323,6 +323,7 @@ QR вида `https://max.ru/:auth/0675a688-c6d6-4140-9d9d-0c9e8907748f`:
 | 66 | 0x042 | MSG_DELETE |
 | 67 | 0x043 | MSG_EDIT |
 | 68 | 0x044 | CHAT_SEARCH |
+| 69 | 0x045 | CALL_EDIT |
 | 70 | 0x046 | MSG_SHARE_PREVIEW |
 | 71 | 0x047 | MSG_GET |
 | 72 | 0x048 | MSG_SEARCH_TOUCH |
@@ -349,6 +350,7 @@ QR вида `https://max.ru/:auth/0675a688-c6d6-4140-9d9d-0c9e8907748f`:
 | 97 | 0x061 | SESSIONS_CLOSE |
 | 98 | 0x062 | PHONE_BIND_REQUEST |
 | 99 | 0x063 | PHONE_BIND_CONFIRM |
+| 100 | 0x064 | VOID |
 | 101 | 0x065 | AUTH_LOGIN_RESTORE_PASSWORD |
 | 103 | 0x067 | GET_INBOUND_CALLS |
 | 104 | 0x068 | AUTH_2FA_DETAILS |
@@ -375,19 +377,27 @@ QR вида `https://max.ru/:auth/0675a688-c6d6-4140-9d9d-0c9e8907748f`:
 | 130 | 0x082 | NOTIF_MARK |
 | 131 | 0x083 | NOTIF_CONTACT |
 | 132 | 0x084 | NOTIF_PRESENCE |
+| 133 | 0x085 | UNKNOWN_133 |
 | 134 | 0x086 | NOTIF_CONFIG |
 | 135 | 0x087 | NOTIF_CHAT |
 | 136 | 0x088 | NOTIF_ATTACH |
 | 137 | 0x089 | NOTIF_CALL_START |
+| 138 | 0x08A | UNKNOWN_138 |
 | 139 | 0x08B | NOTIF_CONTACT_SORT |
 | 140 | 0x08C | NOTIF_MSG_DELETE_RANGE |
+| 141 | 0x08D | UNKNOWN_141 |
 | 142 | 0x08E | NOTIF_MSG_DELETE |
 | 143 | 0x08F | NOTIF_CALLBACK_ANSWER |
 | 144 | 0x090 | CHAT_BOT_COMMANDS |
 | 145 | 0x091 | BOT_INFO |
+| 146 | 0x092 | UNKNOWN_146 |
 | 147 | 0x093 | NOTIF_LOCATION |
 | 148 | 0x094 | NOTIF_LOCATION_REQUEST |
+| 149 | 0x095 | UNKNOWN_149 |
 | 150 | 0x096 | NOTIF_ASSETS_UPDATE |
+| 151 | 0x097 | UNKNOWN_151 |
+| 152 | 0x098 | UNKNOWN_152 |
+| 153 | 0x099 | UNKNOWN_153 |
 | 154 | 0x09A | NOTIF_MSG_DELAYED |
 | 155 | 0x09B | NOTIF_MSG_REACTIONS_CHANGED |
 | 156 | 0x09C | NOTIF_MSG_YOU_REACTED |
@@ -401,6 +411,7 @@ QR вида `https://max.ru/:auth/0675a688-c6d6-4140-9d9d-0c9e8907748f`:
 | 165 | 0x0A5 | NOTIF_CALL_HISTORY |
 | 166 | 0x0A6 | VIDEO_CHAT_JOIN |
 | 167 | 0x0A7 | VIDEO_CHAT_HANGUP |
+| 177 | 0x0B1 | GET_USERINFO |
 | 178 | 0x0B2 | MSG_REACTION |
 | 179 | 0x0B3 | MSG_CANCEL_REACTION |
 | 180 | 0x0B4 | MSG_GET_REACTIONS |
@@ -426,6 +437,7 @@ QR вида `https://max.ru/:auth/0675a688-c6d6-4140-9d9d-0c9e8907748f`:
 | 217 | 0x0D9 | STORIES_EDIT |
 | 218 | 0x0DA | STORIES_DELETE |
 | 220 | 0x0DC | STORIES_GET_BY_STORY_ID |
+| 224 | 0x0E0 | CAPTCHA_REQUEST |
 | 256 | 0x100 | ORG_INFO |
 | 257 | 0x101 | CHAT_REACTIONS_SETTINGS_SET |
 | 258 | 0x102 | REACTIONS_SETTINGS_GET_BY_CHAT_ID |
@@ -438,6 +450,8 @@ QR вида `https://max.ru/:auth/0675a688-c6d6-4140-9d9d-0c9e8907748f`:
 | 275 | 0x113 | FOLDERS_REORDER |
 | 276 | 0x114 | FOLDERS_DELETE |
 | 277 | 0x115 | NOTIF_FOLDERS |
+| 288 | 0x120 | QR_AUTH_REQUEST |
+| 289 | 0x121 | QR_AUTH_POLL |
 | 290 | 0x122 | AUTH_QR_APPROVE |
 | 292 | 0x124 | NOTIF_BANNERS |
 | 293 | 0x125 | NOTIF_TRANSCRIPTION |
@@ -450,3 +464,13 @@ QR вида `https://max.ru/:auth/0675a688-c6d6-4140-9d9d-0c9e8907748f`:
 | 306 | 0x132 | GET_POLL_UPDATES |
 | 307 | 0x133 | CHAT_CHECK_ESIA |
 
+
+## Поле cmd
+
+| `cmd` | Название в логах (`z69`) | Что означает |
+| :---: | :--- | :--- |
+| `0` | `SEND` / `receive` / `notif` | Сообщение/уведомление от клиента (редко - от сервера: в ответной логике `rdcVar.b == 0` обрабатывается как `NOTIF`) |
+| `1` | `RECEIVE` | Успешный ответ на ранее отправленный запрос |
+| `2` | `SEND_ACK` | ACK на отправленный пакет |
+| `3` | `ERROR` | Ошибка на ранее отправленный запрос |
+| `4` | `EXCEPTION` | Исключение в обработке |

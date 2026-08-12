@@ -318,7 +318,7 @@ class Message(BaseModel):
     id: int
     time: MSKTimestamp
     type: str | None = None
-    sender: int
+    sender: int | None = None
     text: str
     attaches: List[Attach]
     reactionInfo: Dict | None = None

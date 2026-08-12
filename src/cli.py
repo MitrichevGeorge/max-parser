@@ -10,7 +10,7 @@ from prompt_toolkit.history import FileHistory
 import questionary
 
 from client import Tuiclient
-from network import Opcodes
+from network_api import Opcodes
 from tools import UniversalEncoder
 
 
@@ -75,49 +75,56 @@ async def main():
 
     with patch_stdout(raw=True):
         q = Tuiclient()
-        await q.begin()
-        await q._netw_connect()
+        try:
+            await q.begin()
+            await q._netw_connect()
 
-        print("Enter commands as: [opcode] [json dict]")
-        print("Examples: 49 {\"chatId\": 123}   or   GET_MESSAGES {\"chatId\": 123}")
-        print("Type 'exit', 'quit' or press Ctrl+C to leave.\n")
+            print("Enter commands as: [opcode] [json dict]")
+            print("Examples: 49 {\"chatId\": 123}   or   GET_MESSAGES {\"chatId\": 123}")
+            print("Type 'exit', 'quit' or press Ctrl+C to leave.\n")
 
-        while True:
-            try:
-                text = await questionary.text(
-                    "Command ->",
-                    style=STYLE,
-                    completer=completer,
-                    history=history,
-                ).ask_async()
-            except (KeyboardInterrupt, EOFError):
-                break
+            while True:
+                try:
+                    text = await questionary.text(
+                        "Command ->",
+                        style=STYLE,
+                        completer=completer,
+                        history=history,
+                    ).ask_async()
+                except (KeyboardInterrupt, EOFError):
+                    break
 
-            if text is None:
-                break
+                if text is None:
+                    break
 
-            text = text.strip()
-            if text.lower() in {"exit", "quit", "q"}:
-                break
-            if not text:
-                continue
-            if text.lower() in {"login", "signin"}:
-                await q.select_account()
+                text = text.strip()
+                if text.lower() in {"exit", "quit", "q"}:
+                    break
+                if not text:
+                    continue
+                if text.lower() in {"login", "signin"}:
+                    await q.select_account()
+                    continue
+                elif text.lower() == "tokens":
+                    for i in q.vault.tokens:
+                        print(i.token)
+                    continue
 
-            try:
-                opcode, payload = parse_command(text)
-            except ValueError as exc:
-                print(f"[parse error] {exc}")
-                continue
+                try:
+                    opcode, payload = parse_command(text)
+                except ValueError as exc:
+                    print(f"[parse error] {exc}")
+                    continue
 
-            try:
-                response = await q.request(opcode, payload)
-                print(json.dumps(response, cls=UniversalEncoder, indent=2, ensure_ascii=False))
-            except Exception:
-                print("[request error]")
-                traceback.print_exc()
-
-        print("bye")
+                try:
+                    response = await q.request(opcode, payload)
+                    print(json.dumps(response, cls=UniversalEncoder, indent=2, ensure_ascii=False))
+                except Exception:
+                    print("[request error]")
+                    traceback.print_exc()
+        finally:
+            await q.disconnect()
+            print("bye")
 
 
 if __name__ == "__main__":
