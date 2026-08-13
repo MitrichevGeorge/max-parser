@@ -36,6 +36,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def _login_with_token(token: str, proxy_url: Optional[str] = None) -> Tuiclient:
+    if not token or not str(token).strip():
+        raise ValueError("Empty token")
+
+    cl = Tuiclient()
+    if proxy_url:
+        cl.proxy = proxy_url
+
+    await cl._netw_connect()
+    cl.token = str(token).strip()
+    await cl.finalise_auth()
+
+    profile = getattr(cl, "profile", None)
+    if profile is None:
+        await cl.disconnect()
+        raise RuntimeError("finalise_auth succeeded but profile is empty — auth failed")
+
+    logger.info(
+        "Logged in as %s (id=%s)",
+        getattr(profile, "get_name", lambda: "?")(),
+        getattr(profile, "id", "?"),
+    )
+    return cl
+
+
 
 @dataclass
 class ScrapingState:
@@ -96,7 +121,6 @@ class ScrapingState:
         self.total_ids = max(0, self.id_max - self.id_min)
 
     def update_excel_path(self) -> None:
-        """Set file name based on actual first/last user IDs written to the sheet."""
         first = self.first_user_id
         last = self.last_user_id
         if first is None or last is None:
@@ -106,17 +130,14 @@ class ScrapingState:
 
     @property
     def save_path(self) -> str:
-        """Return the fixed path used for saving the workbook during the run."""
         if self._save_path is None:
             self._save_path = self.excel_path
         return self._save_path
 
     def reset_save_path(self) -> None:
-        """Reset save path so the next run picks up the new excel_path."""
         self._save_path = None
 
     def set_range(self, id_min: int, id_max: int, id_step: int) -> None:
-        """Update scanning range, recalculate progress and target file name."""
         self.id_min = id_min
         self.id_max = id_max
         self.id_step = id_step
@@ -146,7 +167,6 @@ class ScrapingState:
             self.batch_logs.pop(0)
 
     def set_action(self, action: str, duration_estimate: float = 0.0, detail: str = "") -> None:
-        """Set current action with optional duration estimate for progress bar."""
         self.current_action = action
         self.action_started_at = time.time()
         self.action_duration_estimate = max(duration_estimate, 0.001)
@@ -154,7 +174,6 @@ class ScrapingState:
         self.action_detail = detail
 
     def update_action_progress(self) -> None:
-        """Update action_progress based on elapsed time vs estimate."""
         if self.action_duration_estimate <= 0:
             self.action_progress = 0.0
             return
@@ -170,7 +189,6 @@ class ScrapingState:
 
     @property
     def estimated_remaining_seconds(self) -> float:
-        """ETA based on average batch duration."""
         if self.batch_count == 0 or not self.is_running:
             return 0.0
         remaining_ids = self.id_max - self.current_id
@@ -249,6 +267,7 @@ class Account:
     username: Optional[str] = None
     user_id: Optional[int] = None
     valid: bool = False
+    sleeping: bool = False
     error: Optional[str] = None
     profile: Optional[UserProfile] = None
 
@@ -258,13 +277,12 @@ class Account:
             "username": self.username or "—",
             "user_id": self.user_id,
             "valid": self.valid,
+            "sleeping": self.sleeping,
             "error": self.error,
         }
 
 
 class AccountManager:
-    """Stores, validates and rotates scraping accounts."""
-
     def __init__(self, path: Path) -> None:
         self.path = path
         self.accounts: List[Account] = []
@@ -288,6 +306,7 @@ class AccountManager:
                     username=a.get("username"),
                     user_id=a.get("user_id"),
                     valid=bool(a.get("valid", False)),
+                    sleeping=bool(a.get("sleeping", False)),
                     error=a.get("error"),
                 )
                 for a in data.get("accounts", [])
@@ -308,6 +327,7 @@ class AccountManager:
                     "username": a.username,
                     "user_id": a.user_id,
                     "valid": a.valid,
+                    "sleeping": a.sleeping,
                     "error": a.error,
                 }
                 for a in self.accounts
@@ -331,7 +351,13 @@ class AccountManager:
         return [a.to_dict() for a in self.accounts]
 
     def valid_count(self) -> int:
-        return sum(1 for a in self.accounts if a.valid)
+        return sum(1 for a in self.accounts if a.valid and not a.sleeping)
+
+    def active_count(self) -> int:
+        return self.valid_count()
+
+    def all_sleeping_or_invalid(self) -> bool:
+        return self.valid_count() == 0 and len(self.accounts) > 0
 
     def next_valid_index(self, start: int) -> Optional[int]:
         n = len(self.accounts)
@@ -339,33 +365,46 @@ class AccountManager:
             return None
         for offset in range(1, n + 1):
             idx = (start + offset) % n
-            if self.accounts[idx].valid:
+            acc = self.accounts[idx]
+            if acc.valid and not acc.sleeping:
                 return idx
         return None
 
+    def mark_sleeping(self, idx: int, reason: str = "") -> None:
+        if 0 <= idx < len(self.accounts):
+            acc = self.accounts[idx]
+            acc.sleeping = True
+            if reason:
+                acc.error = reason
+            logger.warning(
+                "Account %s (idx=%d) marked as sleeping: %s",
+                acc.username or acc.user_id or acc.token[:12],
+                idx,
+                reason or "API error",
+            )
+
     async def validate_token(self, token: str) -> Account:
-        cl = Tuiclient()
-        cl.proxy = self.proxy_url
+        cl: Optional[Tuiclient] = None
         try:
-            await cl._netw_connect()
-            cl.token = token
-            await cl.finalise_auth()
+            cl = await _login_with_token(token, self.proxy_url)
             profile = cl.profile
             return Account(
                 token=token,
                 username=profile.get_name(),
                 user_id=profile.id,
                 valid=True,
+                sleeping=False,
                 profile=profile,
             )
         except Exception as exc:
             logger.exception("Token validation failed")
-            return Account(token=token, valid=False, error=str(exc))
+            return Account(token=token, valid=False, sleeping=False, error=str(exc))
         finally:
-            try:
-                await cl.disconnect()
-            except Exception:
-                pass
+            if cl is not None:
+                try:
+                    await cl.disconnect()
+                except Exception:
+                    pass
 
     async def add_account(self, account: Account) -> Account:
         async with self._lock:
@@ -424,8 +463,6 @@ class AccountManager:
 
 
 class ScraperManager:
-    """Handles scraper task lifecycle: start, stop and restart with new settings."""
-
     def __init__(self, state: ScrapingState):
         self.state = state
         self._task: Optional[asyncio.Task] = None
@@ -560,7 +597,6 @@ async def _broadcast_state(state: ScrapingState) -> None:
 
 
 async def _run_scraper_wrapper(state: ScrapingState) -> None:
-    """Wrap scraper to log crashes and broadcast the error state."""
     try:
         await _run_scraper(state)
     except asyncio.CancelledError:
@@ -576,7 +612,6 @@ async def _run_scraper_wrapper(state: ScrapingState) -> None:
 async def _wait_while_running(
     state: ScrapingState, duration: float, action: str, detail: str = ""
 ) -> bool:
-    """Wait for `duration` seconds while running and not paused. Return False if stopped/paused."""
     state.set_action(action, duration_estimate=duration, detail=detail)
     start = time.time()
     while time.time() - start < duration:
@@ -618,11 +653,9 @@ async def _run_scraper(state: ScrapingState) -> None:
     active_client: Optional[Tuiclient] = None
     active_account_index = -1
     batches_on_current = 0
-    init_log_done = False
 
     async def close_active() -> None:
         nonlocal active_client
-        if active_client is not None:
             try:
                 await active_client.disconnect()
             except Exception:
@@ -634,7 +667,7 @@ async def _run_scraper(state: ScrapingState) -> None:
         batches_on_current = state.batches_per_account
 
     async def activate_next_account() -> bool:
-        nonlocal active_client, active_account_index, batches_on_current, init_log_done
+        nonlocal active_client, active_account_index, batches_on_current
         await close_active()
         if active_account_index != -1:
             if not await _wait_while_running(
@@ -648,9 +681,15 @@ async def _run_scraper(state: ScrapingState) -> None:
             ):
                 return False
 
+        if manager.valid_count() == 0:
+            state.last_error = "Все аккаунты спящие или недоступны — сохраняю и останавливаюсь"
+            state.add_reinit_log("Все аккаунты спящие/недоступны. Остановка скрапера.")
+            return False
+
         next_idx = manager.next_valid_index(active_account_index)
         if next_idx is None:
-            state.last_error = "Нет доступных аккаунтов для продолжения"
+            state.last_error = "Нет доступных (не спящих) аккаунтов для продолжения"
+            state.add_reinit_log("Нет доступных аккаунтов — остановка")
             return False
 
         active_account_index = next_idx
@@ -665,36 +704,32 @@ async def _run_scraper(state: ScrapingState) -> None:
         )
         await _broadcast_state(state)
 
-        cl = Tuiclient()
-        cl.proxy = manager.proxy_url
-        if not init_log_done:
-            await cl._init_log()
-            init_log_done = True
+        cl: Optional[Tuiclient] = None
         try:
-            await cl._netw_connect()
-            cl.token = account.token
-            await cl.finalise_auth()
+            cl = await _login_with_token(account.token, manager.proxy_url)
             account.profile = cl.profile
             account.user_id = cl.profile.id
             account.username = cl.profile.get_name()
             account.valid = True
+            account.sleeping = False
             account.error = None
             active_client = cl
+            cl = None
             manager.save(state)
             state.add_reinit_log(f"Аккаунт {account.username} ({account.user_id}) активен")
             await _broadcast_state(state)
             return True
         except Exception as exc:
             logger.exception("Account login failed")
-            account.valid = False
-            account.error = str(exc)
+            manager.mark_sleeping(next_idx, f"Ошибка входа: {exc}")
             manager.save(state)
             state.last_error = f"Ошибка входа в аккаунт {account.username or account.user_id}: {exc}"
-            state.add_reinit_log(f"Ошибка входа: {exc}")
-            try:
-                await cl.disconnect()
-            except Exception:
-                pass
+            state.add_reinit_log(f"Аккаунт усыплён (ошибка входа): {exc}")
+            if cl is not None:
+                try:
+                    await cl.disconnect()
+                except Exception:
+                    pass
             await _broadcast_state(state)
             return False
 
@@ -725,7 +760,18 @@ async def _run_scraper(state: ScrapingState) -> None:
 
             need_switch = active_client is None or batches_on_current >= state.batches_per_account
             if need_switch:
-                ok = await activate_next_account()
+                ok = False
+                attempts = 0
+                max_attempts = max(1, manager.valid_count() + 1)
+                while attempts < max_attempts and state.is_running:
+                    ok = await activate_next_account()
+                    if ok:
+                        break
+                    attempts += 1
+                    if manager.valid_count() == 0:
+                        state.last_error = "Все аккаунты спящие или недоступны — сохраняю и останавливаюсь"
+                        state.add_reinit_log("Все аккаунты уснули. Финальное сохранение и стоп.")
+                        break
                 if not ok or not state.is_running:
                     break
 
@@ -749,9 +795,26 @@ async def _run_scraper(state: ScrapingState) -> None:
             except Exception as exc:
                 logger.exception("Batch fetch failed")
                 state.last_error = str(exc)
-                state.add_reinit_log(f"Ошибка батча: {exc}")
+                if active_account_index >= 0:
+                    manager.mark_sleeping(
+                        active_account_index,
+                        f"Ошибка API при батче: {exc}",
+                    )
+                    manager.save(state)
+                    state.add_reinit_log(
+                        f"Аккаунт {state.current_account_username or active_account_index} "
+                        f"усыплён из-за ошибки API: {exc}"
+                    )
+                else:
+                    state.add_reinit_log(f"Ошибка батча: {exc}")
                 await close_active()
                 force_switch()
+
+                if manager.valid_count() == 0:
+                    state.last_error = "Все аккаунты спящие — сохраняю таблицу и останавливаюсь"
+                    state.add_reinit_log("Все аккаунты уснули. Финальное сохранение и стоп.")
+                    break
+
                 if state.reinit_cooldown_seconds > 0:
                     await _wait_while_running(
                         state, state.reinit_cooldown_seconds, "reinit", "Кулдаун после ошибки"
@@ -1043,19 +1106,22 @@ _DASHBOARD_HTML = """
                 <div class="text-muted italic text-sm">Аккаунты не настроены</div>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-                <div class="flex items-center gap-2">
-                    <input type="text" id="token-input" placeholder="Вставьте токен"
-                           class="flex-1 bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors">
-                    <button onclick="addToken()" class="btn-press flex items-center gap-2 bg-success hover:bg-success/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+            <div class="space-y-3 mb-3">
+                <div>
+                    <label class="block text-xs text-muted mb-1">Токены (каждый с новой строки — можно вставить сразу несколько)</label>
+                    <textarea id="token-input" rows="4" placeholder="token1&#10;token2&#10;token3"
+                              class="w-full bg-bg border border-border rounded-lg px-3 py-2 text-sm text-text focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors font-mono resize-y"></textarea>
+                </div>
+                <div class="flex flex-wrap items-center gap-3">
+                    <button onclick="addToken()" id="add-token-btn" class="btn-press flex items-center gap-2 bg-success hover:bg-success/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
                         <i data-lucide="key" class="w-4 h-4"></i>
-                        Добавить токен
+                        <span id="add-token-btn-text">Добавить токены</span>
+                    </button>
+                    <button onclick="openPhoneModal()" class="btn-press flex items-center justify-center gap-2 bg-accent hover:bg-accent/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+                        <i data-lucide="smartphone" class="w-4 h-4"></i>
+                        Войти по номеру
                     </button>
                 </div>
-                <button onclick="openPhoneModal()" class="btn-press flex items-center justify-center gap-2 bg-accent hover:bg-accent/80 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-                    <i data-lucide="smartphone" class="w-4 h-4"></i>
-                    Войти по номеру
-                </button>
             </div>
         </div>
 
@@ -1494,7 +1560,7 @@ _DASHBOARD_HTML = """
                 }
 
                 renderAccounts(d.accounts || []);
-                const validAccounts = (d.accounts || []).filter(a => a.valid).length;
+                const validAccounts = (d.accounts || []).filter(a => a.valid && !a.sleeping).length;
                 const startBtn = document.getElementById('start-btn');
                 if (startBtn) startBtn.disabled = validAccounts === 0 || d.is_running;
                 const restartBtn = document.getElementById('restart-btn');
@@ -1884,25 +1950,45 @@ _DASHBOARD_HTML = """
         function renderAccounts(accounts) {
             const container = document.getElementById('accounts-list');
             const summary = document.getElementById('accounts-summary');
-            const validCount = accounts.filter(a => a.valid).length;
-            if (summary) summary.textContent = `${validCount} доступных / ${accounts.length}`;
+            const activeCount = accounts.filter(a => a.valid && !a.sleeping).length;
+            const sleepingCount = accounts.filter(a => a.sleeping).length;
+            if (summary) {
+                let text = `${activeCount} доступных / ${accounts.length}`;
+                if (sleepingCount > 0) text += ` (${sleepingCount} спящих)`;
+                summary.textContent = text;
+            }
             if (!container) return;
             if (accounts.length === 0) {
                 container.innerHTML = '<div class="text-muted italic text-sm">Аккаунты не настроены</div>';
                 return;
             }
             container.innerHTML = accounts.map((a, idx) => {
-                const statusColor = a.valid ? 'bg-success' : 'bg-danger';
-                const statusText = a.valid ? 'Доступен' : 'Недоступен';
+                let statusColor, statusText, borderCls, badgeCls;
+                if (a.sleeping) {
+                    statusColor = 'bg-warn';
+                    statusText = 'Спящий';
+                    borderCls = 'border-warn/30';
+                    badgeCls = 'bg-warn/15 text-warn';
+                } else if (a.valid) {
+                    statusColor = 'bg-success';
+                    statusText = 'Доступен';
+                    borderCls = 'border-success/30';
+                    badgeCls = 'bg-success/15 text-success';
+                } else {
+                    statusColor = 'bg-danger';
+                    statusText = 'Недоступен';
+                    borderCls = 'border-danger/30';
+                    badgeCls = 'bg-danger/15 text-danger';
+                }
                 const errorBlock = a.error ? `<div class="text-xs text-danger truncate mt-1" title="${a.error}">${a.error}</div>` : '';
-                return `<div class="bg-bg border ${a.valid ? 'border-success/30' : 'border-danger/30'} rounded-lg p-3 flex flex-col justify-between">
+                return `<div class="bg-bg border ${borderCls} rounded-lg p-3 flex flex-col justify-between">
                     <div class="flex items-start justify-between">
                         <div>
                             <div class="text-sm font-semibold text-text">${a.username || 'Аккаунт'}</div>
                             <div class="text-xs text-muted">ID: ${a.user_id || '—'}</div>
                             <div class="text-xs text-muted font-mono">${a.token_prefix || ''}</div>
                         </div>
-                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${a.valid ? 'bg-success/15 text-success' : 'bg-danger/15 text-danger'}">
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${badgeCls}">
                             <span class="w-1.5 h-1.5 rounded-full ${statusColor}"></span>${statusText}
                         </span>
                     </div>
@@ -1922,19 +2008,38 @@ _DASHBOARD_HTML = """
 
         async function addToken() {
             const input = document.getElementById('token-input');
-            const token = input?.value?.trim();
-            if (!token) return;
-            input.value = '';
+            const raw = input?.value?.trim();
+            if (!raw) return;
+            const tokens = raw.replace(/\\r/g, '').split(String.fromCharCode(10)).map(t => t.trim()).filter(Boolean);
+            if (tokens.length === 0) return;
+
+            const btn = document.getElementById('add-token-btn');
+            const btnText = document.getElementById('add-token-btn-text');
+            if (btn) btn.disabled = true;
+            if (btnText) btnText.textContent = tokens.length > 1 ? `Добавляю ${tokens.length}...` : 'Добавляю...';
+
             try {
                 const res = await fetch('/api/accounts', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({token})
+                    body: JSON.stringify({token: raw})
                 });
                 const data = await res.json();
-                if (!data.ok) alert(data.error || 'Ошибка добавления токена');
+                if (data.results) {
+                    const msg = `Добавлено: ${data.added}, ошибок: ${data.failed}`;
+                    if (data.failed > 0) {
+                        const errs = data.results.filter(r => !r.ok).map(r => r.token_prefix + ': ' + (r.error || '')).join(String.fromCharCode(10));
+                        alert(msg + String.fromCharCode(10, 10) + 'Ошибки:' + String.fromCharCode(10) + errs);
+                    }
+                } else if (!data.ok) {
+                    alert(data.error || 'Ошибка добавления токена');
+                }
+                input.value = '';
             } catch (err) {
                 alert('Ошибка сети');
+            } finally {
+                if (btnText) btnText.textContent = 'Добавить токены';
+                if (btn) btn.disabled = false;
             }
         }
 
@@ -2241,7 +2346,6 @@ _SOCKS_SCHEME_RE = re.compile(r"^(socks4|socks5|socks5h)://", re.IGNORECASE)
 
 
 def _parse_socks_url(url: str) -> tuple[str, int]:
-    """Extract host and port from a SOCKS URL for TCP ping."""
     parsed = urlsplit(url)
     host = parsed.hostname
     port = parsed.port
@@ -2251,7 +2355,6 @@ def _parse_socks_url(url: str) -> tuple[str, int]:
 
 
 async def _ping_proxy_host(proxy_url: str, timeout: float = 10.0) -> tuple[bool, float, Optional[str]]:
-    """TCP-connect to the proxy host:port and return (ok, ms, error)."""
     try:
         host, port = _parse_socks_url(proxy_url)
         start = time.time()
@@ -2271,7 +2374,6 @@ async def _ping_proxy_host(proxy_url: str, timeout: float = 10.0) -> tuple[bool,
 
 
 async def _ping_ws_through_proxy(proxy_url: str, timeout: float = 20.0) -> tuple[bool, float, Optional[str]]:
-    """Connect to oneme WS through the proxy and return (ok, ms, error)."""
     cl = Tuiclient()
     cl.proxy = proxy_url
     start = time.time()
@@ -2498,18 +2600,62 @@ async def _handle_add_token(request: web.Request) -> web.Response:
     account_manager: AccountManager = request.app["account_manager"]
     try:
         data = await request.json()
-        token = data.get("token", "").strip()
-        if not token:
-            return web.json_response({"ok": False, "error": "Empty token"}, status=400)
-        account = await account_manager.validate_token(token)
-        if not account.valid:
-            return web.json_response({"ok": False, "error": account.error or "Token validation failed", "account": account.to_dict()}, status=400)
-        await account_manager.add_account(account)
+
+        tokens: List[str] = []
+        if "tokens" in data and isinstance(data["tokens"], list):
+            tokens = [str(t).strip() for t in data["tokens"] if str(t).strip()]
+        else:
+            raw = data.get("token", "")
+            if isinstance(raw, str):
+                tokens = [line.strip() for line in raw.splitlines() if line.strip()]
+            elif raw:
+                tokens = [str(raw).strip()]
+
+        if not tokens:
+            return web.json_response({"ok": False, "error": "Empty token(s)"}, status=400)
+
+        results: List[Dict[str, Any]] = []
+        added = 0
+        failed = 0
+
+        for token in tokens:
+            account = await account_manager.validate_token(token)
+            if account.valid:
+                account.sleeping = False
+                await account_manager.add_account(account)
+                added += 1
+                results.append({"ok": True, "account": account.to_dict()})
+            else:
+                failed += 1
+                results.append({
+                    "ok": False,
+                    "error": account.error or "Token validation failed",
+                    "token_prefix": _mask_token(token),
+                    "account": account.to_dict(),
+                })
+
         account_manager.save(state)
         await _broadcast_state(state)
-        return web.json_response({"ok": True, "account": account.to_dict()})
+
+        # Single-token backward compatible response
+        if len(tokens) == 1:
+            r = results[0]
+            if r["ok"]:
+                return web.json_response({"ok": True, "account": r["account"]})
+            return web.json_response(
+                {"ok": False, "error": r.get("error"), "account": r.get("account")},
+                status=400,
+            )
+
+        return web.json_response({
+            "ok": failed == 0,
+            "added": added,
+            "failed": failed,
+            "total": len(tokens),
+            "results": results,
+        })
     except Exception as exc:
-        logger.exception("Add token failed")
+        logger.exception("Add token(s) failed")
         return web.json_response({"ok": False, "error": str(exc)}, status=500)
 
 
@@ -2521,6 +2667,8 @@ async def _handle_check_account(request: web.Request) -> web.Response:
         if not 0 <= idx < len(account_manager.accounts):
             return web.json_response({"ok": False, "error": "Account not found"}, status=404)
         account = await account_manager.validate_token(account_manager.accounts[idx].token)
+        if account.valid:
+            account.sleeping = False
         await account_manager.add_account(account)
         account_manager.save(state)
         await _broadcast_state(state)
@@ -2688,19 +2836,24 @@ async def _handle_phone_verify(request: web.Request) -> web.Response:
         if not pending or pending.get("stage") != "code" or not pending.get("auth_token"):
             return web.json_response({"ok": False, "error": "Сначала запросите код"}, status=400)
 
-        cl = Tuiclient()
-        cl.proxy = account_manager.proxy_url
+        cl: Optional[Tuiclient] = None
         try:
+            cl = Tuiclient()
+            if account_manager.proxy_url:
+                cl.proxy = account_manager.proxy_url
             await cl._netw_connect()
             login_token = await cl.check_verify_code(pending["auth_token"], code)
-            cl.token = login_token
-            await cl.finalise_auth()
+            await cl.disconnect()
+            cl = None
+
+            cl = await _login_with_token(login_token, account_manager.proxy_url)
             profile = cl.profile
             account = Account(
                 token=login_token,
                 username=profile.get_name(),
                 user_id=profile.id,
                 valid=True,
+                sleeping=False,
                 profile=profile,
             )
             await account_manager.add_account(account)
@@ -2709,10 +2862,11 @@ async def _handle_phone_verify(request: web.Request) -> web.Response:
             await _broadcast_state(state)
             return web.json_response({"ok": True, "account": account.to_dict()})
         finally:
-            try:
-                await cl.disconnect()
-            except Exception:
-                pass
+            if cl is not None:
+                try:
+                    await cl.disconnect()
+                except Exception:
+                    pass
     except Exception as exc:
         logger.exception("Phone verify failed")
         return web.json_response({"ok": False, "error": str(exc)}, status=500)
