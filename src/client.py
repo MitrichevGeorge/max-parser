@@ -16,10 +16,10 @@ from typing import Any, Dict, List, NoReturn
 from operator import itemgetter
 from loguru import logger
 import sys
-from network_api import NetworkMixin, ServerError, WrongPhoneError
+from network_api import LoginNeedPassw, NetworkMixin, ServerError, WrongPhoneError
 import captcha
 from tools import RussianPhoneValidator, any_without, ask_exact, read_number, ask, sel, sel_str, bye, UniversalEncoder
-from crypt import ClientVault, InvalidPasswordError, TokenModel
+from crypt import ClientVault, InvalidPasswordError, TokenModel, pw_ask
 from pathlib import Path
 from logserver import LOGS_PORT
 import socket
@@ -140,11 +140,10 @@ class Client(NetworkMixin):
         chat.messages = await self.get_messages(chat_id)
         chat.update_messages()
 
-        unique_users = list(set(chat.participants) | {msg.sender for msg in chat.messages})
-        print(unique_users)
-        if isinstance(unique_users, List[int]):
-            await self.update_missing_users(unique_users)
-        print(self.users_by_id)
+        unique_users = list(set(chat.participants) | {msg.sender for msg in chat.messages if msg.sender})
+        # print(unique_users)
+        await self.update_missing_users(unique_users)
+        # print(self.users_by_id)
 
         result: list[tuple[int, str, int]] = []
         for index, message in enumerate(chat.messages):
@@ -224,8 +223,15 @@ class Tuiclient(Client):
             try:
                 verify_code = await ask("verify code ->")
                 return await self.check_verify_code(auth_token, verify_code)
+            except LoginNeedPassw as err:
+                challenge = err.passwordChallenge
+                print(f"Email: {challenge.email}")
+                password = await pw_ask("2FA pass ->")
+                login = await self.login_password(challenge.trackId, password)
+                self.profile = login.profile.contact
+                return login.token
             except ServerError as err:
-                print(err)
+                print(err, type(err))
 
     async def select_account(self) -> None:
         await self.disconnect()
@@ -290,7 +296,7 @@ class Tuiclient(Client):
             
             while True:
                 options = list(map(itemgetter(1), norm_chat)) + ["Send message", "Call", "Back", "Main menu", "Delete chat"]
-                select = await sel(options, f"Main menu -> Chats -> {self.get_chat_name(chat)}")
+                select = await sel(options, f"Main menu -> Chats -> {await self.get_chat_name(chat)}")
 
                 if select < len(norm_chat):
                     msg_id = norm_chat[select][2]

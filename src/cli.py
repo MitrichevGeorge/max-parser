@@ -15,7 +15,7 @@ from tools import UniversalEncoder
 
 
 def build_opcode_completer() -> WordCompleter:
-    words: list[str] = []
+    words: list[str] = ["exit", "quit", "q", "login", "signin", "tokens"]
     for op in Opcodes:
         words.append(str(op.value))
         words.append(op.name)

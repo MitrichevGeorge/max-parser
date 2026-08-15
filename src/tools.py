@@ -1,4 +1,4 @@
-from typing import Iterable, Any, Final, List, NoReturn, Sequence
+from typing import Iterable, Any, Final, List, NoReturn, Sequence, Tuple, Dict
 import math
 import json
 import base64
@@ -172,3 +172,78 @@ def format_duration(seconds: int) -> str:
             parts.append(f"{value} {label}")
             
     return " ".join(parts)
+
+import random
+
+SCREENS = [
+    "1200x1920 1.0x",
+    "1920x1080 1.0x",
+    "1920x1080 1.25x",
+    "2560x1440 1.0x",
+    "2560x1440 1.25x",
+    "1440x900 2.0x",
+    "1680x1050 2.0x",
+    "2560x1600 2.0x",
+    "1536x864 1.25x",
+    "1366x768 1.0x",
+]
+
+OS_PRESETS = [
+    ("Mac", "Macintosh; Intel Mac OS X 10_15_7"),
+    ("Windows 10", "Windows NT 10.0; Win64; x64"),
+    ("Windows 11", "Windows NT 10.0; Win64; x64"),
+    ("Linux", "X11; Linux x86_64"),
+]
+
+BROWSER_TEMPLATES = {
+    "Chrome": lambda os, v: f"Mozilla/5.0 ({os}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{v} Safari/537.36",
+    "Firefox": lambda os, v: f"Mozilla/5.0 ({os}; rv:{v.split('.')[0]}.0) Gecko/20100101 Firefox/{v.split('.')[0]}.0",
+    "Edge": lambda os, v: f"Mozilla/5.0 ({os}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{v} Safari/537.36 Edg/{v}",
+    "Safari": lambda os, v: f"Mozilla/5.0 ({os}) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+}
+
+BASE_HEADERS = {
+    "Host": "ws-api.oneme.ru",
+    "Accept": "*/*",
+    "Accept-Language": "en-US,en;q=0.9,ru-RU;q=0.8,ru;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br, zstd",
+    "Sec-WebSocket-Version": "13",
+    "Origin": "https://web.max.ru",
+    "Sec-WebSocket-Extensions": "permessage-deflate",
+    "Sec-Fetch-Storage-Access": "none",
+    "Sec-GPC": "1",
+    "Connection": "Upgrade",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "websocket",
+    "Sec-Fetch-Site": "cross-site",
+    "Pragma": "no-cache",
+    "Cache-Control": "no-cache",
+    "Upgrade": "websocket",
+}
+
+BASE_USER_AGENT = {
+    "deviceType": "WEB",
+    "pushDeviceType": "WEBPUSH",
+    "locale": "en",
+    "deviceLocale": "en",
+    "appVersion": "26.6.20",
+    "timezone": "Europe/Moscow",
+}
+
+def generate_user_agent_pair() -> Tuple[Dict[str, str], Dict[str, Any]]:
+    os_ver, os_ua = random.choice(OS_PRESETS)
+    browser = random.choice(list(BROWSER_TEMPLATES.keys()))
+    
+    ver = f"{random.randint(110, 126)}.0.{random.randint(1000, 9999)}.{random.randint(10, 99)}"
+    ua_string = BROWSER_TEMPLATES[browser](os_ua, ver)
+
+    headers = {**BASE_HEADERS, "User-Agent": ua_string}
+    user_agent = {
+        **BASE_USER_AGENT,
+        "osVersion": os_ver,
+        "deviceName": browser,
+        "headerUserAgent": ua_string,
+        "screen": random.choice(SCREENS),
+    }
+
+    return headers, user_agent

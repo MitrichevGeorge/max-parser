@@ -656,11 +656,11 @@ async def _run_scraper(state: ScrapingState) -> None:
 
     async def close_active() -> None:
         nonlocal active_client
-            try:
-                await active_client.disconnect()
-            except Exception:
-                pass
-            active_client = None
+        try:
+            await active_client.disconnect()
+        except Exception:
+            pass
+        active_client = None
 
     def force_switch() -> None:
         nonlocal batches_on_current
@@ -2346,6 +2346,7 @@ _SOCKS_SCHEME_RE = re.compile(r"^(socks4|socks5|socks5h)://", re.IGNORECASE)
 
 
 def _parse_socks_url(url: str) -> tuple[str, int]:
+    """Extract host and port from a SOCKS URL for TCP ping."""
     parsed = urlsplit(url)
     host = parsed.hostname
     port = parsed.port
@@ -2355,6 +2356,7 @@ def _parse_socks_url(url: str) -> tuple[str, int]:
 
 
 async def _ping_proxy_host(proxy_url: str, timeout: float = 10.0) -> tuple[bool, float, Optional[str]]:
+    """TCP-connect to the proxy host:port and return (ok, ms, error)."""
     try:
         host, port = _parse_socks_url(proxy_url)
         start = time.time()
@@ -2374,6 +2376,7 @@ async def _ping_proxy_host(proxy_url: str, timeout: float = 10.0) -> tuple[bool,
 
 
 async def _ping_ws_through_proxy(proxy_url: str, timeout: float = 20.0) -> tuple[bool, float, Optional[str]]:
+    """Connect to oneme WS through the proxy and return (ok, ms, error)."""
     cl = Tuiclient()
     cl.proxy = proxy_url
     start = time.time()
@@ -2596,6 +2599,11 @@ async def _handle_accounts(request: web.Request) -> web.Response:
 
 
 async def _handle_add_token(request: web.Request) -> web.Response:
+    """Add one or many tokens. Accepts:
+    - {"token": "single"}
+    - {"tokens": ["t1", "t2", ...]}
+    - {"token": "line1\\nline2\\n..."}  (multiline string)
+    """
     state: ScrapingState = request.app["state"]
     account_manager: AccountManager = request.app["account_manager"]
     try:
@@ -2607,6 +2615,7 @@ async def _handle_add_token(request: web.Request) -> web.Response:
         else:
             raw = data.get("token", "")
             if isinstance(raw, str):
+                # Support multiline paste
                 tokens = [line.strip() for line in raw.splitlines() if line.strip()]
             elif raw:
                 tokens = [str(raw).strip()]
@@ -2668,7 +2677,7 @@ async def _handle_check_account(request: web.Request) -> web.Response:
             return web.json_response({"ok": False, "error": "Account not found"}, status=404)
         account = await account_manager.validate_token(account_manager.accounts[idx].token)
         if account.valid:
-            account.sleeping = False
+            account.sleeping = False  # wake up on successful re-check
         await account_manager.add_account(account)
         account_manager.save(state)
         await _broadcast_state(state)
@@ -2838,6 +2847,7 @@ async def _handle_phone_verify(request: web.Request) -> web.Response:
 
         cl: Optional[Tuiclient] = None
         try:
+            # Step 1: exchange SMS code for login token
             cl = Tuiclient()
             if account_manager.proxy_url:
                 cl.proxy = account_manager.proxy_url
@@ -2846,6 +2856,7 @@ async def _handle_phone_verify(request: web.Request) -> web.Response:
             await cl.disconnect()
             cl = None
 
+            # Step 2: full login with the received token (same flow as token paste)
             cl = await _login_with_token(login_token, account_manager.proxy_url)
             profile = cl.profile
             account = Account(

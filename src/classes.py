@@ -1,6 +1,6 @@
 from typing import List, Dict, Any, Literal, Annotated, Union
 from enum import StrEnum
-from pydantic import BaseModel, Field, Json, field_validator
+from pydantic import AliasPath, BaseModel, Field, Json, field_validator
 from tools import OnOffBool, MSKTimestamp, format_bytes, format_duration
 
 class NameInfo(BaseModel):
@@ -76,7 +76,7 @@ class Chat(BaseModel):
     restrictions: int | None = None
     prevMessageId: int | None = None
     participantsCount: int | None = None
-    participants: Dict | None = None
+    participants: Dict[int, int] | None = None
 
     link: str | None = None
     baseIconUrl: str | None = None
@@ -104,6 +104,7 @@ class Chat(BaseModel):
 
 class ProfileContainer(BaseModel):
     contact: UserProfile
+    profileOptions: list[int]
 
 class ChatConfig(BaseModel):
     dontDisturbUntil: int
@@ -204,6 +205,7 @@ class AttachType(StrEnum):
     CALL = "CALL"
     POLL = "POLL"
     SHARE = "SHARE"
+    INLINE_KEYBOARD = "INLINE_KEYBOARD"
 
 class HangupTypes(StrEnum):
     REJECTED = "REJECTED"
@@ -385,3 +387,12 @@ class QrAuthResp(BaseModel):
     expiresAt: MSKTimestamp
     pollingInterval: int
     ttl: int
+
+class LoginPasswordChallenge(BaseModel):
+    trackId: str
+    email: str
+    config: Dict[str, int]
+
+class LoginPasswordResponse(BaseModel):
+    token: str = Field(validation_alias=AliasPath('tokenAttrs', 'LOGIN', 'token'))
+    profile: ProfileContainer

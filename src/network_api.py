@@ -2,64 +2,114 @@ from eventkit import Event
 import json
 import time
 import uuid
-from typing import List, Dict, Any, Union
 from pydantic import TypeAdapter
 from operator import itemgetter
 from datetime import datetime
 from enum import IntEnum
 
-from classes import BeginCallResp, Chat, IncomingCall, QrAuthResp, UserProfile, Message, VideoUrls, NewMsgEvent
+from classes import BeginCallResp, Chat, IncomingCall, LoginPasswordChallenge, QrAuthResp, UserProfile, Message, VideoUrls, NewMsgEvent, LoginPasswordResponse
 from tools import UniversalEncoder
 from network_core import NetworkCoreWS, NetworkCoreMobile, get_device_payload, get_mobile_device_payload, get_call_payload, get_auth_payload, PC_USER_AGENT
 
-class ServerError(RuntimeError):
-    def __init__(self, message: Union[str, Dict[str, Any]] = "", error: str = ""):
-        if isinstance(message, dict):
-            payload = message
-            message = (
-                payload.get("localizedMessage")
-                or payload.get("message")
-                or "Unknown server error"
-            )
-            error = str(payload.get("error", ""))
+from collections.abc import Sequence
+from typing import Any, ClassVar, Sequence, TypeVar, get_type_hints, Dict
 
+T = TypeVar("T", bound="ServerError")
+
+
+class ServerError(RuntimeError):
+    _error_map: ClassVar[dict[str, type["ServerError"]]] = {}
+    _error_code: ClassVar[str] = ""
+
+    message: str
+    error: str
+
+    def __init__(self, message: str = "", error: str = "", **kwargs: Any) -> None:
         super().__init__(message)
-        self.error: str = error
+        self.message = message
+        self.error = error or getattr(self, "_error_code", "")
+
+        hints = get_type_hints(self.__class__)
+        for field in hints:
+            if field in ("message", "error") or field.startswith("_"):
+                continue
+            if hasattr(self.__class__, field):
+                setattr(self, field, getattr(self.__class__, field))
+
+        for key, value in kwargs.items():
+            if key in hints:
+                setattr(self, key, value)
+            else:
+                raise TypeError(f"{self.__class__.__name__}() got unexpected keyword argument {key!r}")
+
+    def __init_subclass__(
+        cls,
+        error_code: str | Sequence[str] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init_subclass__(**kwargs)
+
+        if error_code is not None:
+            codes = (error_code,) if isinstance(error_code, str) else tuple(error_code)
+            for code in codes:
+                existing = ServerError._error_map.get(code)
+                if existing is not None and existing is not cls:
+                    raise TypeError(f"Duplicate error_code {code!r}: registered to {existing.__qualname__!r}")
+                ServerError._error_map[code] = cls
+            cls._error_code = codes[0]
+
+    @classmethod
+    def from_payload(cls: type[T], payload: dict[str, Any]) -> T:
+        message = (
+            payload.get("localizedMessage")
+            or payload.get("message")
+            or "Unknown server error"
+        )
+        error = str(payload.get("error", ""))
+
+        target = ServerError._error_map.get(error, cls)
+        if not issubclass(target, cls):
+            target = cls
+
+        hints = get_type_hints(target)
+        extra: dict[str, Any] = {}
+
+        for field in hints:
+            if field in ("message", "error") or field.startswith("_"):
+                continue
+            if field in payload:
+                extra[field] = payload[field]
+
+        return target(message=message, error=error, **extra)
+
 
 class QrAuthError(ServerError):
-    _ERROR_MAP: Dict[str, type] = {}
-
-    def __new__(cls, message: Union[str, Dict[str, Any]] = "", error: str = ""):
-        if isinstance(message, dict) and cls is QrAuthError:
-            error_code = str(message.get("error", ""))
-            target = QrAuthError._ERROR_MAP.get(error_code, cls)
-            return super().__new__(target)
-
-        return super().__new__(cls)
-
-    def __init__(self, message: Union[str, Dict[str, Any]] = "", error: str = ""):
-        super().__init__(message, error)
-
-class InvalidQr(QrAuthError):
     pass
 
-class TrackExpired(QrAuthError):
+class InvalidQr(QrAuthError, error_code="qr_link.invalid"):
     pass
 
-class QrLoginDisabled(QrAuthError):
+class TrackExpired(QrAuthError, error_code="track.not.found"):
     pass
 
-QrAuthError._ERROR_MAP["qr_link.invalid"] = InvalidQr
-QrAuthError._ERROR_MAP["track.not.found"] = TrackExpired
-QrAuthError._ERROR_MAP["qr_login.disabled"] = QrLoginDisabled
-
-class WrongPhoneError(ServerError):
+class QrLoginDisabled(QrAuthError, error_code="qr_login.disabled"):
     pass
+
+
+class WrongPhoneError(ServerError, error_code="error.phone.wrong"):
+    pass
+
+class LoginError(ServerError):
+    pass
+
+class LoginNeedPassw(LoginError):
+    passwordChallenge: LoginPasswordChallenge
+
 
 class SearchError(ServerError):
     pass
 
-class SearchNotFound(SearchError):
+class SearchNotFound(SearchError, error_code="search.not_found"):
     pass
 
 class Opcodes(IntEnum):
@@ -91,6 +141,7 @@ class Opcodes(IntEnum):
     QR_AUTH_GETID = 288
     QR_AUTH_POLL = 289
     QR_AUTH_APPROVE = 290
+    AUTH_LOGIN_CHECK_PASSWORD = 115
 
 class NetworkMixin(NetworkCoreWS):
     def _netw_init(self):
@@ -139,17 +190,17 @@ class NetworkMixin(NetworkCoreWS):
             return None
         return UserProfile.model_validate(response["payload"]["contact"])
 
-    async def get_infos(self, contactIds: List[int]) -> List[UserProfile]:
+    async def get_infos(self, contactIds: list[int]) -> list[UserProfile]:
         response = await self.request(Opcodes.GET_INFOS, {'contactIds': contactIds})
         if response['cmd'] == 1:
-            adapter = TypeAdapter(List[UserProfile])
+            adapter = TypeAdapter(list[UserProfile])
             return adapter.validate_python(response["payload"]["contacts"])
         raise ServerError(response["payload"])
 
-    async def get_messages(self, chatID: int, dFrom: datetime = datetime.now(), backward: int = 100, forward: int = 100) -> List[Message]:
+    async def get_messages(self, chatID: int, dFrom: datetime = datetime.now(), backward: int = 100, forward: int = 100) -> list[Message]:
         response = await self.request(Opcodes.GET_MESSAGES, {'chatId': chatID, 'from': int(dFrom.timestamp() * 1000), 'forward': forward, 'backward': backward, 'getMessages': True})
         if response["cmd"] == 1:
-            adapter = TypeAdapter(List[Message])
+            adapter = TypeAdapter(list[Message])
             return adapter.validate_python(response["payload"]["messages"])
         raise ServerError(response["payload"])
 
@@ -190,14 +241,15 @@ class NetworkMixin(NetworkCoreWS):
             response = await self.request(Opcodes.SEND_VERIFY_CODE, { 'phone': phoneNumber, 'type': 'RESEND', 'language': 'ru', 'captchaToken': captchaToken })
         if response["cmd"] == 1:
             return response["payload"]["token"]
-        if response["payload"]["error"] == "error.phone.wrong":
-            raise WrongPhoneError(response["payload"]["message"])
-        raise ServerError(response["payload"])
+        raise ServerError(response["payload"]) # WrongPhoneError / 
 
     async def check_verify_code(self, token: str, verifyCode: str) -> str:
         response = await self.request(Opcodes.CHECK_VERIFY_CODE, {'token': token, 'verifyCode': verifyCode, 'authTokenType': 'CHECK_CODE'})
         if response["cmd"] == 1:
-            return response["payload"]["tokenAttrs"]["LOGIN"]["token"]
+            if "LOGIN" in response["payload"]["tokenAttrs"]:
+                return response["payload"]["tokenAttrs"]["LOGIN"]["token"]
+            elif "passwordChallenge" in response["payload"]:
+                raise LoginNeedPassw(passwordChallenge = LoginPasswordChallenge.model_validate(response["payload"]["passwordChallenge"]))
         raise ServerError(response["payload"])
 
     async def logout(self) -> None:
@@ -224,11 +276,18 @@ class NetworkMixin(NetworkCoreWS):
             return
         raise ServerError(response["payload"])
 
-    async def begin_call(self, calleeIds: List[int], conversationId: str | None = None) -> BeginCallResp:
+    async def begin_call(self, calleeIds: list[int], conversationId: str | None = None) -> BeginCallResp:
         conversationId = conversationId or str(uuid.uuid4())
         response = await self.request(Opcodes.BEGIN_CALL, {'conversationId': conversationId, 'calleeIds': calleeIds, 'internalParams': get_call_payload(self.device_id), 'isVideo': False})
         if response["cmd"] == 1:
             return BeginCallResp.model_validate(response["payload"])
+        raise ServerError(response["payload"])
+
+    async def create_chat(self, title: str, userIds: list[int], notify: bool = True) -> Chat:
+        cid = -(time.time_ns() // 1_000_000)
+        response = await self.request(Opcodes.SEND_MESAGE, {'message': {'cid': cid, 'attaches': [{'_type': 'CONTROL', 'event': 'new', 'chatType': 'CHAT', 'title': title, 'userIds': userIds}]}, 'notify': notify})
+        if response["cmd"] == 1:
+            return Chat.model_validate(response["payload"]["chat"])
         raise ServerError(response["payload"])
 
     async def qr_auth_getid(self) -> QrAuthResp:
@@ -243,19 +302,6 @@ class NetworkMixin(NetworkCoreWS):
         if response["cmd"] == 1:
             return response["payload"]
         raise ServerError(response["payload"])
-
-    async def create_chat(self, title: str, userIds: List[int], notify: bool = True) -> Chat:
-        cid = -(time.time_ns() // 1_000_000)
-        response = await self.request(Opcodes.SEND_MESAGE, {'message': {'cid': cid, 'attaches': [{'_type': 'CONTROL', 'event': 'new', 'chatType': 'CHAT', 'title': title, 'userIds': userIds}]}, 'notify': notify})
-        if response["cmd"] == 1:
-            return Chat.model_validate(response["payload"]["chat"])
-        raise ServerError(response["payload"])
-
-    async def change_name(self, firstName: str, lastName: str = '') -> UserProfile:
-        response = await self.request(Opcodes.CHANGE_NAME, {'firstName': firstName, 'lastName': lastName})
-        if response["cmd"] == 1:
-            return UserProfile.model_validate(response["payload"]["profile"]["contact"])
-        raise ServerError(response["payload"])
     
     async def qr_auth_approve(self, qrLink: str) -> None:
         response = await self.request(Opcodes.QR_AUTH_APPROVE, {'qrLink': qrLink})
@@ -264,5 +310,16 @@ class NetworkMixin(NetworkCoreWS):
             return
         raise QrAuthError(response["payload"])
 
-# open("src/w3.json", "w").wzrite(json.dumps(response, cls=UniversalEncoder, indent=2))
+    async def change_name(self, firstName: str, lastName: str = '') -> UserProfile:
+        response = await self.request(Opcodes.CHANGE_NAME, {'firstName': firstName, 'lastName': lastName})
+        if response["cmd"] == 1:
+            return UserProfile.model_validate(response["payload"]["profile"]["contact"])
+        raise ServerError(response["payload"])
 
+    async def login_password(self, trackId: str, password: str) -> LoginPasswordResponse:
+        response = await self.request(Opcodes.AUTH_LOGIN_CHECK_PASSWORD, {"trackId": trackId, "password": password})
+        if response["cmd"] == 1:
+            return LoginPasswordResponse.model_validate(response["payload"])
+        raise ServerError(response["payload"])
+
+# open("src/w3.json", "w").wzrite(json.dumps(response, cls=UniversalEncoder, indent=2))

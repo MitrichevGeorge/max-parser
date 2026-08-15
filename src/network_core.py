@@ -11,6 +11,7 @@ from abc import ABC, abstractmethod
 from loguru import logger
 from python_socks.async_.asyncio import Proxy
 from convert import PacketCodec
+from tools import generate_user_agent_pair
 
 import ssl
 import lz4
@@ -65,40 +66,7 @@ async def _read_exact(reader: asyncio.StreamReader, n: int) -> bytes:
         buf.extend(chunk)
     return bytes(buf)
 
-
-PC_HEADERS = {
-    "Host": "ws-api.oneme.ru",
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.93 Safari/537.36",
-    "Accept": "*/*",
-    "Accept-Language": "en-US,en;q=0.9,ru-RU;q=0.8,ru;q=0.7",
-    "Accept-Encoding": "gzip, deflate, br, zstd",
-    "Sec-WebSocket-Version": "13",
-    "Origin": "https://web.max.ru",
-    "Sec-WebSocket-Extensions": "permessage-deflate",
-    "Sec-Fetch-Storage-Access": "none",
-    "Sec-GPC": "1",
-    "Connection": "Upgrade",
-    "Sec-Fetch-Dest": "empty",
-    "Sec-Fetch-Mode": "websocket",
-    "Sec-Fetch-Site": "cross-site",
-    "Pragma": "no-cache",
-    "Cache-Control": "no-cache",
-    "Upgrade": "websocket",
-}
-
-PC_USER_AGENT = {
-    "deviceType": "WEB",
-    "pushDeviceType": "WEBPUSH",
-    "locale": "en",
-    "deviceLocale": "en",
-    "osVersion": "Mac",
-    "deviceName": "Chrome",
-    "headerUserAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.93 Safari/537.36",
-    "appVersion": "26.6.20",
-    "screen": "1200x1920 1.0x",
-    "timezone": "Europe/Moscow",
-}
-
+PC_HEADERS, PC_USER_AGENT = generate_user_agent_pair()
 
 def get_device_payload(device_id: str, user_agent: Dict[str, str]) -> dict:
     return {

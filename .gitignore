@@ -11,3 +11,4 @@ src/users_table.py
 .tokens
 
 res/
+accounts.json
