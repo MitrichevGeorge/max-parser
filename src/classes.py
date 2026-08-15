@@ -232,6 +232,8 @@ class BaseAttach(BaseModel):
             return f'{CALL_TYPE_TEXT[self.callType]} call {self.hangupType} {format_duration(self.duration)} [{self.conversationId}]'
         if isinstance(self, PollAttach):
             return f'[Poll] {[i.text for i in self.answers]} {self.state.total} voted'
+        if isinstance(self, InlineKeyboardAttach):
+            return f'[Keyboard] {sum(len(i) for i in self.buttons)}'
         return "idk"
 
 class ControlAttach(BaseAttach):
@@ -300,8 +302,29 @@ class ShareAttach(BaseAttach):
     title: str
     url: str
 
+class InlineKeyboardButtonType(StrEnum):
+    LINK = "LINK"
+
+class BaseInlineKeyboardButton(BaseModel):
+    pass
+
+class InlineKeyboardLinkButton(BaseInlineKeyboardButton):
+    type: Literal[InlineKeyboardButtonType.LINK] = Field(default=InlineKeyboardButtonType.LINK, alias="_type")
+    text: str
+    url: str
+
+InlineKeyboardButton = Annotated[
+    Union[InlineKeyboardLinkButton],
+    Field(discriminator='type')
+]
+
+class InlineKeyboardAttach(BaseAttach):
+    type: Literal[AttachType.INLINE_KEYBOARD] = Field(default=AttachType.INLINE_KEYBOARD, alias="_type")
+    callbackId: str
+    buttons: list[list[InlineKeyboardButton]] = Field(validation_alias=AliasPath('keyboard', 'buttons'))
+
 Attach = Annotated[
-    Union[ControlAttach, PhotoAttach, VideoAttach, FileAttach, CallAttach, PollAttach, ShareAttach],
+    Union[ControlAttach, PhotoAttach, VideoAttach, FileAttach, CallAttach, PollAttach, ShareAttach, InlineKeyboardAttach],
     Field(discriminator='type')
 ]
 

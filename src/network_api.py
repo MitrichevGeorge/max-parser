@@ -322,4 +322,4 @@ class NetworkMixin(NetworkCoreWS):
             return LoginPasswordResponse.model_validate(response["payload"])
         raise ServerError(response["payload"])
 
-# open("src/w3.json", "w").wzrite(json.dumps(response, cls=UniversalEncoder, indent=2))
+# open("src/w3.json", "w").write(json.dumps(response, cls=UniversalEncoder, indent=2))
