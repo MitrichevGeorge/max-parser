@@ -190,7 +190,8 @@
     </div>
 
     <script>
-      const BLOCKER_CHECK_URL = 'https://static.vk.ru/not_robot_captcha.css?pb_check=' + Date.now();
+      // const BLOCKER_CHECK_URL = 'https://static.vk.ru/not_robot_captcha.css?pb_check=' + Date.now();
+      const BLOCKER_CHECK_URL = 'https://static.vk.ru/';
 
       const statusEl = document.getElementById('status');
       const indicatorEl = document.getElementById('indicator');
@@ -274,7 +275,16 @@
           }
 
           const frameUrl = new URL('/captcha-html', location.origin);
+          const captchaUrl = new URL(data.url);
+
           frameUrl.searchParams.set('url', data.url);
+
+          for (const [key, value] of captchaUrl.searchParams) {
+              if (key !== 'url') {
+                  frameUrl.searchParams.set(key, value);
+              }
+          }
+
           captchaFrame.src = frameUrl.href;
 
           setStatus('Решите капчу', 'spin');
