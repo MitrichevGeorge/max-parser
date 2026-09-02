@@ -1,8 +1,4 @@
 import asyncio
-import datetime
-import json
-
-from network_core import NetworkCoreMobile, NetworkCoreWS
 
 try:
     loop = asyncio.get_running_loop()
@@ -10,31 +6,52 @@ except RuntimeError:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-
-from classes import Attach, AttachType, ConfigContainer, FileAttach, IncomingCall, Message, UserProfile, Chat, ServerData, VideoAttach, NewMsgEvent
-from typing import Any, Dict, List, NoReturn
-from operator import itemgetter
-from loguru import logger
-import sys
-from network_api import LoginNeedPassw, NetworkMixin, ServerError, WrongPhoneError
-import captcha
-from tools import RussianPhoneValidator, any_without, ask_exact, read_number, ask, sel, sel_str, bye, UniversalEncoder
-from crypt import ClientVault, InvalidPasswordError, TokenModel, pw_ask
-from pathlib import Path
-from logserver import LOGS_PORT
+import json
 import socket
-from datetime import datetime
+import sys
+from crypt import ClientVault, TokenModel, pw_ask
+from datetime import datetime, timezone
+from operator import itemgetter
 
 import questionary
+from loguru import logger
 from prompt_toolkit.patch_stdout import patch_stdout
+
+import captcha
+from classes import (
+    Attach,
+    Chat,
+    ConfigContainer,
+    FileAttach,
+    IncomingCall,
+    Message,
+    NewMsgEvent,
+    ServerData,
+    UserProfile,
+    VideoAttach,
+)
+from logserver import LOGS_PORT
+from network_api import LoginNeedPassw, NetworkMixin, ServerError, WrongPhoneError
+from network_core import NetworkCoreMobile, NetworkCoreWS
+from tools import (
+    RussianPhoneValidator,
+    UniversalEncoder,
+    any_without,
+    ask,
+    ask_exact,
+    bye,
+    read_number,
+    sel,
+    sel_str,
+)
 
 
 class Client(NetworkMixin):
     profile: UserProfile
     contacts: list[UserProfile]
     chats: list[Chat]
-    chats_by_id: Dict[int, Chat]
-    users_by_id: Dict[int, UserProfile] = {}
+    chats_by_id: dict[int, Chat]
+    users_by_id: dict[int, UserProfile]
     config: ConfigContainer
 
     def __init__(self) -> None:
@@ -57,7 +74,7 @@ class Client(NetworkMixin):
         print("Chats:")
         [i.info(1) for i in self.chats]
 
-    async def update_missing_users(self, user_ids: List[int]) -> None:
+    async def update_missing_users(self, user_ids: list[int]) -> None:
         missing_ids = list(set(user_ids) - self.users_by_id.keys())
         if not missing_ids:
             return
@@ -238,7 +255,7 @@ class Tuiclient(Client):
         await self._netw_connect()
 
         if self._token_idx is not None:
-            self.vault.tokens[self._token_idx].last_visit_at = datetime.now()
+            self.vault.tokens[self._token_idx].last_visit_at = datetime.now(timezone.utc)
             self.vault.save()
         self._token_idx = None
 
@@ -258,15 +275,17 @@ class Tuiclient(Client):
 
             try:
                 await self.finalise_auth()
+                now_datetime = datetime.now(timezone.utc)
+                
                 if not is_existing_token:
                     selected = await questionary.confirm("Save this token?", default=True, auto_enter=True).ask_async()
                     if selected:
-                        new_token = TokenModel(token=self.token, login_at=datetime.now(), last_visit_at=datetime.now(), username=self.profile.get_name())
+                        new_token = TokenModel(token=self.token, login_at=now_datetime, last_visit_at=now_datetime, username=self.profile.get_name())
                         self.vault.tokens.append(new_token)
                         self._token_idx = len(self.vault.tokens) - 1
                 else:
                     self._token_idx = selection_idx
-                    self.vault.tokens[selection_idx].last_visit_at = datetime.now()
+                    self.vault.tokens[selection_idx].last_visit_at = now_datetime
 
                 self.vault.save()
                 return
@@ -349,7 +368,10 @@ class Tuiclient(Client):
         await self.select_account()
         while True:
             print(f"[{self.profile.id}] {self.profile.get_name()}")
-            match await sel_str(["Profile info", "Contacts", "Chats list", "Limits and config", "User infos", "Swap account", "Account settings", "Logout", "Exit"], "Main menu"):
+            match await sel_str(["Run tests", "Profile info", "Contacts", "Chats list", "Limits and config", "User infos", "Swap account", "Account settings", "Logout", "Exit"], "Main menu"):
+                case "Run tests":
+                    print(await self.search_number("ergre"))
+                    # print(await self.search("qqqq"*10_000_000))
                 case "Profile info":
                     self.profile.info()
                 case "Contacts":
