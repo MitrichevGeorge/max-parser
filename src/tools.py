@@ -91,20 +91,28 @@ class RussianPhoneValidator(Validator):
                 cursor_position=len(document.text)
             )
 
-async def ask(prompt_text: str = "> ", validator: Validator | None = None) -> str:
+async def ask_str(prompt_text: str = "> ", validator: Validator | None = None) -> str:
     try:
         return await questionary.text(prompt_text, validate=validator).ask_async()
     except (EOFError, KeyboardInterrupt):
-        print("\nCancelled by user.")
-        exit(0)
+        bye()
 
-async def read_number(prompt_text: str = "", min_n: int | None = None, max_n: int | None = None) -> int:
+async def ask_int(prompt_text: str = "", min_n: int | None = None, max_n: int | None = None) -> int:
     validator = NumberValidator(min_n, max_n)
-    user_input = await ask(f"{prompt_text} -> ", validator=validator)
+    user_input = await ask_str(f"{prompt_text} -> ", validator=validator)
     if not user_input:
-        print("\nCancelled by user.")
-        exit(0)
+        bye()
     return int(user_input.strip())
+
+async def ask_yn(prompt_text: str = "", default=True, auto_enter=False) -> bool:
+    try:
+        result = await questionary.confirm(prompt_text, default=default, auto_enter=auto_enter).ask_async()
+        if result is None:
+            bye()
+
+        return result
+    except (EOFError, KeyboardInterrupt):
+        bye()
 
 async def sel(menu_items: Sequence[str], prompt_text: str = "") -> int:
     if not menu_items:
@@ -247,3 +255,37 @@ def generate_user_agent_pair() -> Tuple[Dict[str, str], Dict[str, Any]]:
     }
 
     return headers, user_agent
+
+
+import qrcode.constants
+import qrcode
+from rich.text import Text
+
+def generate_qr(data: str) -> Text:
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=1,
+        border=2,
+    )
+    qr.add_data(data)
+    qr.make(fit=True)
+    matrix = qr.get_matrix()
+
+    output = Text()
+    print(matrix[0][0])
+    for y in range(0, len(matrix)-1, 2):
+        for x in range(len(matrix[0])):
+            top = matrix[y][x]
+            bottom = matrix[y + 1][x] if (y + 1) < len(matrix) else True
+
+            if top and bottom:
+                output.append("█")
+            elif top and not bottom:
+                output.append("▀")
+            elif not top and bottom:
+                output.append("▄")
+            else:
+                output.append(" ")
+        output.append("\n")
+    return output

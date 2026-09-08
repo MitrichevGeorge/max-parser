@@ -13,7 +13,6 @@ from crypt import ClientVault, TokenModel, pw_ask
 from datetime import datetime, timezone
 from operator import itemgetter
 
-import questionary
 from loguru import logger
 from prompt_toolkit.patch_stdout import patch_stdout
 
@@ -37,12 +36,14 @@ from tools import (
     RussianPhoneValidator,
     UniversalEncoder,
     any_without,
-    ask,
+    ask_str,
     ask_exact,
     bye,
-    read_number,
+    ask_int,
+    ask_yn,
     sel,
     sel_str,
+    generate_qr,
 )
 
 
@@ -57,6 +58,7 @@ class Client(NetworkMixin):
     def __init__(self) -> None:
         self._netw_init()
         self.token = ""
+        self.users_by_id = {}
 
     async def finalise_auth(self):
         data = ServerData.model_validate(await self._netw_auth(self.token))
@@ -146,7 +148,7 @@ class Client(NetworkMixin):
         print(f'{child_indent}ReactionInfo: {message.reactionInfo}')
         print(f'{indent}└{"─"*6}')
         if ask:
-            selected = await questionary.confirm("Mark as read?", default=False, auto_enter=True).ask_async()
+            selected = await ask_yn("Mark as read?", default=False, auto_enter=True)
             if selected:
                 await self.mark_as_read(chatId, message.id)
 
@@ -206,7 +208,7 @@ class Tuiclient(Client):
         return f"{token.username} [last: {last} logged in: {login}]"
 
     async def _auth_by_phone(self) -> str:
-        phone_number = await ask("phone number ->", validator=RussianPhoneValidator())
+        phone_number = await ask_str("phone number ->", validator=RussianPhoneValidator())
         if isinstance(self, NetworkCoreMobile):
             while True:
                 try:
@@ -216,7 +218,7 @@ class Tuiclient(Client):
                     break
                 except WrongPhoneError as err:
                     print(err)
-                    phone_number = await ask("phone number ->", validator=RussianPhoneValidator())
+                    phone_number = await ask_str("phone number ->", validator=RussianPhoneValidator())
                 except ServerError as err:
                     print(err)
                     bye()
@@ -231,14 +233,14 @@ class Tuiclient(Client):
                     break
                 except WrongPhoneError as err:
                     print(err)
-                    phone_number = await ask("phone number ->", validator=RussianPhoneValidator())
+                    phone_number = await ask_str("phone number ->", validator=RussianPhoneValidator())
                 except ServerError as err:
                     print(err)
                     bye()
 
         while True:
             try:
-                verify_code = await ask("verify code ->")
+                verify_code = await ask_str("verify code ->")
                 return await self.check_verify_code(auth_token, verify_code)
             except LoginNeedPassw as err:
                 challenge = err.passwordChallenge
@@ -249,6 +251,25 @@ class Tuiclient(Client):
                 return login.token
             except ServerError as err:
                 print(err, type(err))
+
+    async def _auth_by_qr(self) -> str: #TODO
+        req = await self.qr_auth_getid()
+        print(f"QR link: {req.qrLink}")
+        print(generate_qr(req.qrLink))
+        print(f"trackId: {req.trackId}")
+        await ask_str("Press Enter to poll ->")
+        try:
+            result = await self.qr_auth_poll(req.trackId)
+            print("Poll result:")
+            print(json.dumps(result, cls=UniversalEncoder, indent=2, ensure_ascii=False))
+            token_attrs = result.get("tokenAttrs") if isinstance(result, dict) else None
+            if isinstance(token_attrs, dict):
+                login = token_attrs.get("LOGIN")
+                new_token = login.get("token") if isinstance(login, dict) else None
+                if new_token:
+                    print(f"New token: {new_token}")
+        except ServerError as err:
+            print(err)
 
     async def select_account(self) -> None:
         await self.disconnect()
@@ -261,7 +282,7 @@ class Tuiclient(Client):
 
         while True:
             tokens = self.vault.tokens
-            options = [*map(self._format_token_variant, tokens), "Enter token", "Auth by number"]
+            options = [*map(self._format_token_variant, tokens), "Enter token", "Auth by number", "Auth by QR"]
             
             selection_idx = await sel(options, "Accounts")
 
@@ -269,16 +290,18 @@ class Tuiclient(Client):
             if is_existing_token:
                 self.token = tokens[selection_idx].token
             elif options[selection_idx] == "Enter token":
-                self.token = await ask("token ->")
+                self.token = await ask_str("token ->")
             elif options[selection_idx] == "Auth by number":
                 self.token = await self._auth_by_phone()
+            elif options[selection_idx] == "Auth by QR":
+                self.token = await self._auth_by_qr()
 
             try:
                 await self.finalise_auth()
                 now_datetime = datetime.now(timezone.utc)
                 
                 if not is_existing_token:
-                    selected = await questionary.confirm("Save this token?", default=True, auto_enter=True).ask_async()
+                    selected = await ask_yn("Save this token?", default=True, auto_enter=True)
                     if selected:
                         new_token = TokenModel(token=self.token, login_at=now_datetime, last_visit_at=now_datetime, username=self.profile.get_name())
                         self.vault.tokens.append(new_token)
@@ -293,7 +316,7 @@ class Tuiclient(Client):
             except ServerError as err:
                 print(err)
                 if is_existing_token:
-                    selected = await questionary.confirm("Remove this token?", default=False, auto_enter=False).ask_async()
+                    selected = await ask_yn("Remove this token?", default=False, auto_enter=False)
                     if selected:
                         del self.vault.tokens[selection_idx]
                         self.vault.save()
@@ -324,7 +347,7 @@ class Tuiclient(Client):
                         message = msg_by_id[msg_id]
                         await self.message_info(message, chat_id)
                 elif options[select] == "Send message":
-                    text: str = await ask()
+                    text: str = await ask_str()
                     message = await self.send_message(chat_id, text)
                     msg_list = chat.messages
                     if msg_list:
@@ -342,7 +365,7 @@ class Tuiclient(Client):
                 elif options[select] == "Main menu":
                     return
                 elif options[select] == "Delete chat":
-                    for_all = await questionary.confirm(f"Delete for all?", default=False, auto_enter=True).ask_async()
+                    for_all = await ask_yn(f"Delete for all?", default=False, auto_enter=True)
                     try:
                         await self.delete_chat(chat_id, for_all)
                     except ServerError as err:
@@ -355,8 +378,7 @@ class Tuiclient(Client):
         self.vault = ClientVault()
         await self.vault.init()
         await self._init_log()
-        # Какое транспортное ядро унаследовано: Mobile (raw TLS api2.oneme.ru)
-        # или Web (WebSocket api.oneme.ru).
+        
         if isinstance(self, NetworkCoreMobile):
             print("Network core: Mobile")
         elif isinstance(self, NetworkCoreWS):
@@ -364,14 +386,19 @@ class Tuiclient(Client):
         else:
             print("Network core: unknown")
 
+    async def user_sendmsg_ask(self, user: UserProfile, show_info: bool = True):
+        if show_info:
+            user.info()
+        if await ask_yn(f"Send message to {user.get_name()}?", default=False, auto_enter=True):
+            text = await ask_str("message ->")
+            msg = await self.send_message(user.id, text, False)
+            await self.message_info(msg, user.id)
+
     async def main_menu(self):
         await self.select_account()
         while True:
             print(f"[{self.profile.id}] {self.profile.get_name()}")
-            match await sel_str(["Run tests", "Profile info", "Contacts", "Chats list", "Limits and config", "User infos", "Swap account", "Account settings", "Logout", "Exit"], "Main menu"):
-                case "Run tests":
-                    print(await self.search_number("ergre"))
-                    # print(await self.search("qqqq"*10_000_000))
+            match await sel_str(["Profile info", "Contacts", "Chats list", "Limits and config", "User infos", "Swap account", "Account settings", "Logout", "Exit"], "Main menu"):
                 case "Profile info":
                     self.profile.info()
                 case "Contacts":
@@ -384,78 +411,55 @@ class Tuiclient(Client):
                 case "User infos":
                     match await sel_str(["Search chats", "Search by number", "Get user by id", "Back"], "Main menu -> User infos"):
                         case "Search chats":
-                            query = await ask("query ->")
-                            result = await self.search(query)
-                            if len(result) == 0:
+                            query = await ask_str("query ->")
+                            results = await self.search(query)
+                            if not results:
                                 print("Nothing found")
-                            else:
-                                for i in result:
-                                    i.info()
+                                continue
+
+                            for chat in results:
+                                chat.info()
+
                         case "Search by number":
-                            query = await ask("phone number ->", validator=RussianPhoneValidator())
-                            result = await self.search_number(query)
-                            if not result:
+                            query = await ask_str("phone number ->", validator=RussianPhoneValidator())
+                            user = await self.search_number(query)
+                            if not user:
                                 print("Nothing found")
-                            else:
-                                result.info()
-                                if await questionary.confirm(f"Send message to {result.get_name()}?", default=False, auto_enter=True).ask_async():
-                                    text = await ask("message ->")
-                                    msg = await self.send_message(result.id, text, False)
-                                    await self.message_info(msg, result.id)
+                                continue
+                            await self.user_sendmsg_ask(user)
+
                         case "Get user by id":
-                            user_id = await read_number("User id", 9_900_000, 900_000_000)
+                            user_id = await ask_int("User id", 50_000, 900_000_000)
                             await self.update_missing_users([user_id])
                             if not user_id in self.users_by_id:
                                 print(f"ID {user_id} not found")
                                 continue
-                            self.users_by_id[user_id].info()
+                            user = self.users_by_id[user_id]
+                            await self.user_sendmsg_ask(user)
+
                         case "Back":
                             pass
                 case "Account settings":
-                    match await sel_str(["Change name", "Get new token", "Delete account", "Back"], "Main menu -> Account settings"):
+                    match await sel_str(["Change name", "Approve login qr link", "Delete account", "Back"], "Main menu -> Account settings"):
                         case "Change name":
-                            name = await ask("name ->")
+                            name = await ask_str("name ->")
                             self.profile = await self.change_name(name)
                         case "Delete account":
                             if await ask_exact(f"Are u sure u want to delete account {self.profile.get_name()}? ->"):
                                 await self.delete_account()
-                        case "Get new token":
-                            match await sel_str(["Get QR (new session)", "Approve link", "Back"], "Main menu -> Account settings -> Get new token"):
-                                case "Get QR (new session)":
-                                    account = Client()
-                                    await account._netw_connect()
-                                    req = await account.qr_auth_getid()
-                                    print(f"QR link: {req.qrLink}")
-                                    print(f"trackId: {req.trackId}")
-                                    print("Approve it (from phone или пунктом 'Approve link'), затем жми Enter.")
-                                    await ask("Press Enter to poll ->")
-                                    try:
-                                        result = await account.qr_auth_poll(req.trackId)
-                                        print("Poll result:")
-                                        print(json.dumps(result, cls=UniversalEncoder, indent=2, ensure_ascii=False))
-                                        token_attrs = result.get("tokenAttrs") if isinstance(result, dict) else None
-                                        if isinstance(token_attrs, dict):
-                                            login = token_attrs.get("LOGIN")
-                                            new_token = login.get("token") if isinstance(login, dict) else None
-                                            if new_token:
-                                                print(f"New token: {new_token}")
-                                    except ServerError as err:
-                                        print(err)
-                                case "Approve link":
-                                    qr_link = await ask("qr link ->")
-                                    try:
-                                        await self.qr_auth_approve(qr_link)
-                                        print("approved")
-                                    except ServerError as err:
-                                        print(err)
-                                case "Back":
-                                    pass
+                        case "Approve login qr link":
+                            qr_link = await ask_str("qr link ->")
+                            try:
+                                await self.qr_auth_approve(qr_link)
+                                print("approved")
+                            except ServerError as err:
+                                print(err)
                         case "Back":
                             pass
                 case "Swap account":
                     await self.select_account()
                 case "Logout":
-                    if await questionary.confirm(f"Log out from {self.profile.get_name()}?", default=False, auto_enter=False).ask_async():
+                    if await ask_yn(f"Log out from {self.profile.get_name()}?", default=False, auto_enter=False):
                         await self.logout()
                         print("logged out")
                         bye()

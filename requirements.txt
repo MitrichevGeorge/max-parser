@@ -5,6 +5,8 @@ msgpack
 loguru
 prompt_toolkit
 questionary
+segno
+rich
 
 aiohttp
 uvicorn
