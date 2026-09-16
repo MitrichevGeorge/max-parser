@@ -30,20 +30,20 @@ from classes import (
     VideoAttach,
 )
 from logserver import LOGS_PORT
-from network_api import LoginNeedPassw, NetworkMixin, ServerError, WrongPhoneError
+from network_api import LoginNeedPassw, NetworkMixin, ServerError, TrackExpired, WrongPhoneError
 from network_core import NetworkCoreMobile, NetworkCoreWS
 from tools import (
     RussianPhoneValidator,
     UniversalEncoder,
     any_without,
-    ask_str,
     ask_exact,
-    bye,
     ask_int,
+    ask_str,
     ask_yn,
+    bye,
+    generate_qr,
     sel,
     sel_str,
-    generate_qr,
 )
 
 
@@ -206,37 +206,27 @@ class Tuiclient(Client):
         last = token.last_visit_at.strftime(self.DATE_FMT)
         login = token.login_at.strftime(self.DATE_FMT)
         return f"{token.username} [last: {last} logged in: {login}]"
-
+    
     async def _auth_by_phone(self) -> str:
         phone_number = await ask_str("phone number ->", validator=RussianPhoneValidator())
-        if isinstance(self, NetworkCoreMobile):
-            while True:
-                try:
-                    # await self.disconnect()
-                    # await self._netw_connect()
+        while True:
+            try:
+                if isinstance(self, NetworkCoreMobile):
                     auth_token = await self.send_verify_code(phone_number)
-                    break
-                except WrongPhoneError as err:
-                    print(err)
-                    phone_number = await ask_str("phone number ->", validator=RussianPhoneValidator())
-                except ServerError as err:
-                    print(err)
-                    bye()
-        else:
-            while True:
-                captcha_url = await self.get_captcha_url(phone_number)
-                try:
+                else:
+                    captcha_url = await self.get_captcha_url(phone_number)
                     captcha_token = await captcha.solve(captcha_url)
                     await self.disconnect()
                     await self._netw_connect()
                     auth_token = await self.send_verify_code(phone_number, captcha_token)
-                    break
-                except WrongPhoneError as err:
-                    print(err)
-                    phone_number = await ask_str("phone number ->", validator=RussianPhoneValidator())
-                except ServerError as err:
-                    print(err)
+                break
+            except WrongPhoneError:
+                phone_number = await ask_str("phone number ->", validator=RussianPhoneValidator())
+                if not phone_number:
                     bye()
+            except ServerError as err:
+                print(err)
+                bye()
 
         while True:
             try:
@@ -257,19 +247,28 @@ class Tuiclient(Client):
         print(f"QR link: {req.qrLink}")
         print(generate_qr(req.qrLink))
         print(f"trackId: {req.trackId}")
-        await ask_str("Press Enter to poll ->")
-        try:
-            result = await self.qr_auth_poll(req.trackId)
-            print("Poll result:")
-            print(json.dumps(result, cls=UniversalEncoder, indent=2, ensure_ascii=False))
-            token_attrs = result.get("tokenAttrs") if isinstance(result, dict) else None
-            if isinstance(token_attrs, dict):
-                login = token_attrs.get("LOGIN")
-                new_token = login.get("token") if isinstance(login, dict) else None
-                if new_token:
-                    print(f"New token: {new_token}")
-        except ServerError as err:
-            print(err)
+        while True:
+            try:
+                result = await self.qr_auth_poll(req.trackId)
+                print("Poll result:")
+                print(json.dumps(result, cls=UniversalEncoder, indent=2, ensure_ascii=False))
+                token_attrs = result.get("tokenAttrs") if isinstance(result, dict) else None
+                if isinstance(token_attrs, dict):
+                    login = token_attrs.get("LOGIN")
+                    new_token = login.get("token") if isinstance(login, dict) else None
+                    if not isinstance(new_token, str):
+                        raise TypeError
+                    if new_token:
+                        print(f"New token: {new_token}")
+                    return new_token
+            except TrackExpired:
+                print("Expired")
+                req = await self.qr_auth_getid()
+                print(f"QR link: {req.qrLink}")
+                print(generate_qr(req.qrLink))
+                print(f"trackId: {req.trackId}")
+            except ServerError as err:
+                print(err, type(err))
 
     async def select_account(self) -> None:
         await self.disconnect()
@@ -331,7 +330,7 @@ class Tuiclient(Client):
             
             chat_id = norm_chatlist[select][2]
             if not isinstance(chat_id, int):
-                raise ValueError
+                raise TypeError
             chat = self.chats_by_id[chat_id]
             chat.info()
             norm_chat = await self.norm_chat(chat_id)
@@ -365,7 +364,7 @@ class Tuiclient(Client):
                 elif options[select] == "Main menu":
                     return
                 elif options[select] == "Delete chat":
-                    for_all = await ask_yn(f"Delete for all?", default=False, auto_enter=True)
+                    for_all = await ask_yn("Delete for all?", default=False, auto_enter=True)
                     try:
                         await self.delete_chat(chat_id, for_all)
                     except ServerError as err:

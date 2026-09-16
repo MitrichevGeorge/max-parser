@@ -5,6 +5,7 @@ msgpack
 loguru
 prompt_toolkit
 questionary
+qrcode
 segno
 rich
 

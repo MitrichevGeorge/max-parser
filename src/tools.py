@@ -1,10 +1,12 @@
-from typing import Iterable, Any, Final, List, NoReturn, Sequence, Tuple, Dict
-import math
-import json
 import base64
+import json
+import math
 import sys
+from collections.abc import Iterable, Sequence
+from typing import Any, Never
 
-def bye() -> NoReturn:
+
+def bye() -> Never:
     print("bye")
     sys.exit(0)
 
@@ -24,10 +26,12 @@ class UniversalEncoder(json.JSONEncoder):
         
         return super().default(o)
 
-from typing import Annotated
-from pydantic import BeforeValidator, PlainSerializer
 from datetime import datetime
+from typing import Annotated
 from zoneinfo import ZoneInfo
+
+from pydantic import BeforeValidator, PlainSerializer
+
 
 def parse_on_off(value: Any) -> bool:
     match value:
@@ -38,7 +42,7 @@ def parse_on_off(value: Any) -> bool:
         case str() if value.strip().upper() == "OFF":
             return False
         case _:
-            raise ValueError(f"Unsupported value: {repr(value)} (type: {type(value).__name__})")
+            raise ValueError(f"Unsupported value: {value!r} (type: {type(value).__name__})")
 
 def serialize_on_off(value: bool) -> str:
     return "ON" if value else "OFF"
@@ -57,10 +61,11 @@ def parse_ms_to_datetime(value):
 MSKTimestamp = Annotated[datetime, BeforeValidator(parse_ms_to_datetime)]
 
 
-from questionary import Validator, ValidationError, Choice
-from prompt_toolkit.patch_stdout import patch_stdout
-import questionary
 import re
+
+import questionary
+from questionary import Choice, ValidationError, Validator
+
 
 class NumberValidator(Validator):
     def __init__(self, min_n: int | None = None, max_n: int | None = None):
@@ -93,7 +98,10 @@ class RussianPhoneValidator(Validator):
 
 async def ask_str(prompt_text: str = "> ", validator: Validator | None = None) -> str:
     try:
-        return await questionary.text(prompt_text, validate=validator).ask_async()
+        result = await questionary.text(prompt_text, validate=validator).ask_async()
+        if result is None:
+            raise KeyboardInterrupt
+        return result
     except (EOFError, KeyboardInterrupt):
         bye()
 
@@ -142,8 +150,8 @@ async def ask_exact(prompt: str, check: str = "YES") -> bool:
 
     return result == check
 
-BINARY_UNITS: Final[tuple[str, ...]] = ('B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB')
-DECIMAL_UNITS: Final[tuple[str, ...]] = ('B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB')
+BINARY_UNITS: tuple[str, ...] = ('B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB')
+DECIMAL_UNITS: tuple[str, ...] = ('B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB')
 
 def format_bytes(size_bytes: int, use_binary: bool = True, precision: int = 2) -> str:
     if size_bytes < 0:
@@ -238,7 +246,7 @@ BASE_USER_AGENT = {
     "timezone": "Europe/Moscow",
 }
 
-def generate_user_agent_pair() -> Tuple[Dict[str, str], Dict[str, Any]]:
+def generate_user_agent_pair() -> tuple[dict[str, str], dict[str, Any]]:
     os_ver, os_ua = random.choice(OS_PRESETS)
     browser = random.choice(list(BROWSER_TEMPLATES.keys()))
     
@@ -257,9 +265,10 @@ def generate_user_agent_pair() -> Tuple[Dict[str, str], Dict[str, Any]]:
     return headers, user_agent
 
 
-import qrcode.constants
 import qrcode
+import qrcode.constants
 from rich.text import Text
+
 
 def generate_qr(data: str) -> Text:
     qr = qrcode.QRCode(

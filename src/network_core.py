@@ -1,21 +1,22 @@
 import asyncio
-import uuid
 import json
 import random
+import ssl
 import traceback
-import websockets
-from pathlib import Path
-from typing import List, Dict, Any
-from collections import defaultdict
+import uuid
 from abc import ABC, abstractmethod
+from collections import defaultdict
+from pathlib import Path
+from typing import Any
+
+import lz4.block
+import msgpack
+import websockets
 from loguru import logger
 from python_socks.async_.asyncio import Proxy
+
 from convert import PacketCodec
 from tools import generate_user_agent_pair
-
-import ssl
-import lz4
-import msgpack
 
 MOBILE_HOST = "api2.oneme.ru"
 MOBILE_PORT = 443
@@ -68,7 +69,7 @@ async def _read_exact(reader: asyncio.StreamReader, n: int) -> bytes:
 
 PC_HEADERS, PC_USER_AGENT = generate_user_agent_pair()
 
-def get_device_payload(device_id: str, user_agent: Dict[str, str]) -> dict:
+def get_device_payload(device_id: str, user_agent: dict[str, str]) -> dict:
     return {
         "userAgent": user_agent,
         "deviceId": device_id,
@@ -111,7 +112,7 @@ class NetworkCore(ABC):
         self.proxy: str | None = None
         self.is_online = False
 
-        self._listeners: Dict[Any, List[asyncio.Queue[Dict[str, Any]]]] = defaultdict(list)
+        self._listeners: dict[Any, list[asyncio.Queue[dict[str, Any]]]] = defaultdict(list)
         self._tasks: set[asyncio.Task] = set()
         self._semaphore = asyncio.Semaphore(32)
 
@@ -130,27 +131,26 @@ class NetworkCore(ABC):
     async def _send(self, opcode: int, payload: Any) -> None:
         ...
 
-    async def _process_message(self, msg: Dict[str, Any]) -> None:
+    async def _process_message(self, msg: dict[str, Any]) -> None:
         async with self._semaphore:
             try:
                 logger.info(f"↓ {msg}")
 
                 cmd = msg.get("cmd")
                 opcode = msg.get("opcode")
-                if isinstance(cmd, int) and cmd > 0:
-                    if opcode in self._listeners:
-                        for queue in list(self._listeners[opcode]):
-                            try:
-                                queue.put_nowait(msg)
-                            except asyncio.QueueFull:
-                                print(f"Queue for opcode {opcode} is full. Message dropped.")
+                if isinstance(cmd, int) and cmd > 0 and opcode in self._listeners:
+                    for queue in list(self._listeners[opcode]):
+                        try:
+                            queue.put_nowait(msg)
+                        except asyncio.QueueFull:
+                            print(f"Queue for opcode {opcode} is full. Message dropped.")
 
                 await self._on_message_received(msg)
 
             except Exception:
                 traceback.print_exc()
 
-    async def _on_message_received(self, msg: Dict[str, Any]) -> None:
+    async def _on_message_received(self, msg: dict[str, Any]) -> None:
         pass
 
     @abstractmethod
@@ -168,8 +168,8 @@ class NetworkCore(ABC):
         except Exception as e:
             print(f"Heartbeat error: {e}")
 
-    async def wait_for_opcode(self, opcode: Any) -> Dict[str, Any]:
-        queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
+    async def wait_for_opcode(self, opcode: Any) -> dict[str, Any]:
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._listeners[opcode].append(queue)
 
         try:
@@ -180,7 +180,7 @@ class NetworkCore(ABC):
             if not self._listeners[opcode]:
                 del self._listeners[opcode]
 
-    async def request(self, opcode: int, payload: Any) -> Dict[str, Any]:
+    async def request(self, opcode: int, payload: Any) -> dict[str, Any]:
         await self._send(opcode, payload)
         return await self.wait_for_opcode(opcode)
 
@@ -306,7 +306,7 @@ class NetworkCoreMobile(NetworkCore):
         self._writer.write(packet)
         await self._writer.drain()
 
-    async def _recv_packet(self) -> Dict[str, Any]:
+    async def _recv_packet(self) -> dict[str, Any]:
         if self._reader is None:
             raise RuntimeError("Client not connected")
 

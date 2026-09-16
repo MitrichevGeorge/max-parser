@@ -212,6 +212,7 @@ class HangupTypes(StrEnum):
     HUNGUP = "HUNGUP"
     CANCELED = "CANCELED"
     MISSED = "MISSED"
+    BUSDY = "BUSDY"
 
 class CallTypes(StrEnum):
     AUDIO = "AUDIO"

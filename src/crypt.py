@@ -6,19 +6,17 @@ import sys
 import unicodedata
 from base64 import b64decode, b64encode
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final, List, NoReturn, TypedDict, List, Dict
+from typing import Any, Final, Never
 
+import questionary
 from argon2.low_level import Type, hash_secret_raw
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
-
 from pydantic import BaseModel, ValidationError
-from datetime import datetime
 
-import questionary
-
-__all__ = ["KDFParams", "VaultError", "CorruptVaultError", "InvalidPasswordError", "ClientVault", "VaultModel", "TokenModel"]
+__all__ = ["ClientVault", "CorruptVaultError", "InvalidPasswordError", "KDFParams", "TokenModel", "VaultError", "VaultModel"]
 
 
 DEFAULT_MEMORY_COST: Final[int] = 256 * 1024   # 256 MiB
@@ -44,7 +42,7 @@ MAX_PLAINTEXT_SIZE: Final[int] = 512 * 1024      # 512 KiB
 MAX_VAULT_FILE_SIZE: Final[int] = 1024 * 1024    # 1 MiB
 
 
-def bye() -> NoReturn:
+def bye() -> Never:
     print("bye")
     sys.exit(0)
 
@@ -66,7 +64,7 @@ class KDFParams:
     def __post_init__(self) -> None:
         for name, value in (("memory_cost", self.memory_cost), ("time_cost", self.time_cost), ("parallelism", self.parallelism)):
             if not isinstance(value, int) or isinstance(value, bool):
-                raise ValueError(f"{name} must be an integer")
+                raise TypeError(f"{name} must be an integer")
 
         if not (MIN_MEMORY_COST <= self.memory_cost <= MAX_MEMORY_COST):
             raise ValueError(
@@ -122,6 +120,15 @@ def _build_aad(kdf: KDFParams, salt: bytes, nonce: bytes) -> bytes:
 
 def _is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
+
+class TokenModel(BaseModel):
+    token: str
+    login_at: datetime
+    last_visit_at: datetime
+    username: str
+
+class VaultModel(BaseModel):
+    tokens: list[TokenModel] = []
 
 class VaultManager:
     def __init__(self, path: Path = VAULT_FILE) -> None:
@@ -303,19 +310,10 @@ class VaultManager:
         if dir_mode & 0o077:
             raise VaultError(f"Vault directory permissions are too permissive: {oct(dir_mode)}")
 
-class TokenModel(BaseModel):
-    token: str
-    login_at: datetime
-    last_visit_at: datetime
-    username: str
-
-class VaultModel(BaseModel):
-    tokens: List[TokenModel] = []
-
 class ClientVault:
     def __init__(self) -> None:
         self.vault = VaultManager(Path(".tokens"))
-        self.tokens: List[TokenModel] = []
+        self.tokens: list[TokenModel] = []
         self._password = ""
 
     async def init(self):
@@ -366,7 +364,7 @@ def main() -> int:
     for i in vault.tokens:
         print(i.token, i.login_at)
 
-    new = TokenModel(token="token", login_at=datetime.now(), last_visit_at=datetime.now(), username="user")
+    new = TokenModel(token="token", login_at=datetime.now(tz=UTC), last_visit_at=datetime.now(tz=UTC), username="user")
     vault.tokens.append(new)
     vault.save()
 

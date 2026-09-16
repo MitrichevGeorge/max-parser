@@ -3,7 +3,6 @@ import json
 import re
 import webbrowser
 from dataclasses import dataclass
-from typing import Optional
 from pathlib import Path
 
 import httpx
@@ -28,8 +27,8 @@ CSP_META_RE = re.compile(r'<meta[^>]*http-equiv=["\']?Content-Security-Policy["\
 
 @dataclass
 class State:
-    captcha_url: Optional[str] = None
-    token_future: Optional[asyncio.Future] = None
+    captcha_url: str | None = None
+    token_future: asyncio.Future | None = None
 
 
 state = State()
@@ -47,7 +46,7 @@ def dedup_v(url: str) -> str:
     return re.sub(r"(v=[^&]+)(&v=[^&]+)+", r"\1", url) if "api.vk.ru" in url else url
 
 
-def extract_token(url: str, body: bytes) -> Optional[str]:
+def extract_token(url: str, body: bytes) -> str | None:
     if "captchaNotRobot" not in url:
         return None
     try:
@@ -136,9 +135,9 @@ def make_app() -> FastAPI:
             print("upstream failed: %s for %s", e, final)
             return JSONResponse({"error": f"upstream: {e}"}, status_code=502)
 
-        if token := extract_token(final, r.content):
-            if state.token_future and not state.token_future.done():
-                state.token_future.set_result(token)
+        token = extract_token(final, r.content)
+        if token and state.token_future and not state.token_future.done():
+            state.token_future.set_result(token)
 
         out = {"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": "false"}
         if ct := r.headers.get("content-type"):
