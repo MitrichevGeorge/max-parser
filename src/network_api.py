@@ -19,6 +19,7 @@ from classes import (
     Message,
     NewMsgEvent,
     QrAuthResp,
+    QrPollResponse,
     UserProfile,
     VideoUrls,
 )
@@ -176,6 +177,7 @@ class Opcodes(IntEnum):
     QR_AUTH_GETID = 288
     QR_AUTH_POLL = 289
     QR_AUTH_APPROVE = 290
+    AUTH_QR_GET_TOKEN = 291
     AUTH_LOGIN_CHECK_PASSWORD = 115
 
 class NetworkMixin(NetworkCoreWS):
@@ -258,6 +260,13 @@ class NetworkMixin(NetworkCoreWS):
             return Message.model_validate(response["payload"]["message"])
         raise ServerError.from_payload(response["payload"])
 
+    async def send_text_message(self, chatId: int, text: str, notify: bool = True) -> Message:
+        cid = -(time.time_ns() // 1_000_000)
+        response = await self.request(Opcodes.SEND_MESAGE, {'chatId': chatId, 'message': {'text': text, 'cid': cid, 'elements': [], 'attaches': []}, 'notify': notify})
+        if response["cmd"] == CMDTypes.OK:
+            return Message.model_validate(response["payload"]["message"])
+        raise ServerError.from_payload(response["payload"])
+
     async def delete_chat(self, chatId: int, forAll: bool = True) -> None:
         last_time = time.time_ns() // 1_000_000
         response = await self.request(Opcodes.DELETE_CHAT, {'chatId': chatId, 'lastEventTime': last_time, 'forAll': forAll})
@@ -333,10 +342,10 @@ class NetworkMixin(NetworkCoreWS):
             return QrAuthResp.model_validate(response["payload"])
         raise ServerError.from_payload(response["payload"])
 
-    async def qr_auth_poll(self, trackId: str) -> dict[str, Any]:
-        response = await self.request(Opcodes.QR_AUTH_POLL, { "trackId" : trackId })
+    async def qr_auth_poll(self, trackId: str) -> QrPollResponse:
+        response = await self.request(Opcodes.QR_AUTH_POLL, {"trackId": trackId})
         if response["cmd"] == CMDTypes.OK:
-            return response["payload"]
+            return QrPollResponse.model_validate(response["payload"]["status"])
         raise ServerError.from_payload(response["payload"])
     
     async def qr_auth_approve(self, qrLink: str) -> None:
@@ -354,6 +363,12 @@ class NetworkMixin(NetworkCoreWS):
 
     async def login_password(self, trackId: str, password: str) -> LoginPasswordResponse:
         response = await self.request(Opcodes.AUTH_LOGIN_CHECK_PASSWORD, {"trackId": trackId, "password": password})
+        if response["cmd"] == CMDTypes.OK:
+            return LoginPasswordResponse.model_validate(response["payload"])
+        raise ServerError.from_payload(response["payload"])
+
+    async def qr_auth_get_token(self, trackId: str) -> LoginPasswordResponse:
+        response = await self.request(Opcodes.AUTH_QR_GET_TOKEN, {"trackId": trackId})
         if response["cmd"] == CMDTypes.OK:
             return LoginPasswordResponse.model_validate(response["payload"])
         raise ServerError.from_payload(response["payload"])

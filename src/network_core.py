@@ -14,6 +14,7 @@ import msgpack
 import websockets
 from loguru import logger
 from python_socks.async_.asyncio import Proxy
+from rich import print
 
 from convert import PacketCodec
 from tools import generate_user_agent_pair
@@ -134,7 +135,10 @@ class NetworkCore(ABC):
     async def _process_message(self, msg: dict[str, Any]) -> None:
         async with self._semaphore:
             try:
-                logger.info(f"↓ {msg}")
+                try:
+                    logger.info(f"↓ {msg}")
+                except BrokenPipeError:
+                    print("loggserver disconnected")
 
                 cmd = msg.get("cmd")
                 opcode = msg.get("opcode")
@@ -211,7 +215,7 @@ class NetworkCoreWS(NetworkCore):
 
         if self.connection:
             await self.connection.close()
-            print(f"Connection to {self.url} closed")
+            print(f"[gray]Connection to {self.url} closed[\gray]")
 
     async def _send(self, opcode: int, payload: Any) -> None:
         logger.info(f"↑ {opcode} {payload}")
@@ -243,6 +247,8 @@ class NetworkCoreWS(NetworkCore):
                     continue
         except asyncio.CancelledError:
             pass
+        except websockets.exceptions.ConnectionClosedError:
+            print("Connection closed")
         finally:
             if self._tasks:
                 print("finishing tasks")
@@ -296,7 +302,7 @@ class NetworkCoreMobile(NetworkCore):
                 await self._writer.wait_closed()
             except Exception:
                 pass
-            print(f"Connection to {self.host}:{self.port} closed")
+            print(f"[red]Connection to {self.host}:{self.port} closed[/red]")
 
     async def _send(self, opcode: int, payload: Any) -> None:
         logger.info(f"↑ {opcode} {payload}")
@@ -360,4 +366,4 @@ class NetworkCoreMobile(NetworkCore):
             if self._tasks:
                 print("finishing tasks")
                 await asyncio.gather(*self._tasks, return_exceptions=True)
-            print("reader loop stopped")
+            print("[gray]reader loop stopped[/gray]")

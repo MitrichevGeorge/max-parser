@@ -79,9 +79,9 @@ By using this parser, you acknowledge and agree that:
 * The use of this software **may result in the permanent ban, suspension, or termination of your account** on `web.max.ru`.
 * The author takes zero responsibility for any enforcement actions taken against your account.
 
-#### 5. Security Warning (.env File)
-This tool relies on injecting active session tokens, cookies, or credentials into a local `.env` file. 
-* **CRITICAL RISK:** If you mishandle, leak, or accidentally commit your `.env` file to a public repository (e.g., GitHub), **third parties can steal your session and fully compromise your account.**
+#### 5. Security Warning (.env and .tokens File)
+This tool relies on injecting active session tokens, cookies, or credentials into a local `.env` or `.tokens` file. 
+* **CRITICAL RISK:** If you mishandle, leak, or accidentally commit your `.env` or `.tokens` file to a public repository (e.g., GitHub), **third parties can steal your session and fully compromise your account.**
 * You are entirely responsible for securing your configuration files and keeping your authentication tokens private.
 
 ---

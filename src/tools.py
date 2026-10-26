@@ -264,7 +264,6 @@ def generate_user_agent_pair() -> tuple[dict[str, str], dict[str, Any]]:
 
     return headers, user_agent
 
-
 import qrcode
 import qrcode.constants
 from rich.text import Text
@@ -275,14 +274,13 @@ def generate_qr(data: str) -> Text:
         version=1,
         error_correction=qrcode.constants.ERROR_CORRECT_L,
         box_size=1,
-        border=2,
+        border=1,
     )
     qr.add_data(data)
     qr.make(fit=True)
     matrix = qr.get_matrix()
 
-    output = Text()
-    print(matrix[0][0])
+    output = Text(justify="center")
     for y in range(0, len(matrix)-1, 2):
         for x in range(len(matrix[0])):
             top = matrix[y][x]
@@ -298,3 +296,15 @@ def generate_qr(data: str) -> Text:
                 output.append(" ")
         output.append("\n")
     return output
+
+import urllib.error
+import urllib.request
+
+
+def check_internet(host: str = "http://cp.cloudflare.com/generate_204", timeout: float = 2.0) -> bool:
+    req = urllib.request.Request(host)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as res:
+            return res.status in (200, 204)
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError):
+        return False

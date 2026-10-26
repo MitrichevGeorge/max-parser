@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import secrets
@@ -360,12 +361,13 @@ async def ask_new_pw() -> str:
 
 def main() -> int:
     vault = ClientVault()
+    asyncio.run(vault.init())
 
     for i in vault.tokens:
-        print(i.token, i.login_at)
+        print(i.token)
 
-    new = TokenModel(token="token", login_at=datetime.now(tz=UTC), last_visit_at=datetime.now(tz=UTC), username="user")
-    vault.tokens.append(new)
+    # new = TokenModel(token="token", login_at=datetime.now(tz=UTC), last_visit_at=datetime.now(tz=UTC), username="user")
+    # vault.tokens.append(new)
     vault.save()
 
     return 0

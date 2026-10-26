@@ -1,7 +1,10 @@
-from typing import List, Dict, Any, Literal, Annotated, Union
 from enum import StrEnum
-from pydantic import AliasPath, BaseModel, Field, Json, field_validator
-from tools import OnOffBool, MSKTimestamp, format_bytes, format_duration
+from typing import Annotated, Any, Literal
+
+from pydantic import AliasPath, BaseModel, Field, Json
+
+from tools import MSKTimestamp, OnOffBool, format_bytes, format_duration
+
 
 class NameInfo(BaseModel):
     name: str
@@ -20,8 +23,8 @@ class UserProfile(BaseModel):
     updateTime: MSKTimestamp
     accountStatus: int
     country: str | None = None
-    names: List[NameInfo]
-    options: List[str]
+    names: list[NameInfo]
+    options: list[str]
     description: str | None = None
     phone: int | None = None
     photoId: int | None = None
@@ -66,7 +69,7 @@ class Chat(BaseModel):
     title: str | None = None
     description: str | None = None
 
-    modified: MSKTimestamp
+    modified: MSKTimestamp | None = None
     joinTime: MSKTimestamp | None = None
     created: MSKTimestamp
     lastEventTime: MSKTimestamp
@@ -76,7 +79,7 @@ class Chat(BaseModel):
     restrictions: int | None = None
     prevMessageId: int | None = None
     participantsCount: int | None = None
-    participants: Dict[int, int] | None = None
+    participants: dict[int, int] | None = None
 
     link: str | None = None
     baseIconUrl: str | None = None
@@ -94,8 +97,8 @@ class Chat(BaseModel):
         print(f'{child_indent}Link: {self.link}')
         print(f'{indent}└{"─"*6}')
 
-    messages: List[Message] | None = None
-    messages_by_id: Dict[int,Message] | None = None
+    messages: list[Message] | None = None
+    messages_by_id: dict[int, Message] | None = None
 
     def update_messages(self):
         if self.messages:
@@ -126,7 +129,6 @@ class UserAccountConfig(BaseModel):
     HIDDEN: bool
     FAMILY_PROTECTION: OnOffBool
     DOUBLE_TAP_REACTION_DISABLED: bool
-    DOUBLE_TAP_REACTION_VALUE: Any
     SAFE_MODE_NO_PIN: bool
 
     CHATS_PUSH_NOTIFICATION: OnOffBool
@@ -162,7 +164,7 @@ class ServerConfig(BaseModel):
     nick_max_length: int = Field(alias="nick-max-length")
     nick_min_length: int = Field(alias="nick-min-length")
 
-    white_list_links: List[str] = Field(alias="white-list-links")
+    white_list_links: list[str] = Field(alias="white-list-links")
 
     def info(self, tab = 0):
         indent = "│" * tab
@@ -186,14 +188,14 @@ class ServerConfig(BaseModel):
 
 
 class ConfigContainer(BaseModel):
-    chats: Dict[int, ChatConfig] | None = None
+    chats: dict[int, ChatConfig] | None = None
     user: UserAccountConfig
     server: ServerConfig
 
 class ServerData(BaseModel):
     profile: ProfileContainer
-    contacts: List[UserProfile]
-    chats: List[Chat]
+    contacts: list[UserProfile]
+    chats: list[Chat]
     config: ConfigContainer
 
 
@@ -241,7 +243,7 @@ class ControlAttach(BaseAttach):
     type: Literal[AttachType.CONTROL] = Field(default=AttachType.CONTROL, alias="_type")
     event: str
     userId: int | None = None
-    userIds: List[int] | None = None
+    userIds: list[int] | None = None
     pinnedMessage: Message | None = None
 
 class PhotoAttach(BaseAttach):
@@ -284,7 +286,7 @@ class PollAnswer(BaseModel):
 
 class PollState(BaseModel):
     total: int
-    voterPreviewIds: List[int]
+    voterPreviewIds: list[int]
 
 class PollAttach(BaseAttach):
     type: Literal[AttachType.POLL] = Field(default=AttachType.POLL, alias="_type")
@@ -293,7 +295,7 @@ class PollAttach(BaseAttach):
     title: str
     version: int
     state: PollState
-    answers: List[PollAnswer]
+    answers: list[PollAnswer]
 
 class ShareAttach(BaseAttach):
     type: Literal[AttachType.SHARE] = Field(default=AttachType.SHARE, alias="_type")
@@ -315,7 +317,7 @@ class InlineKeyboardLinkButton(BaseInlineKeyboardButton):
     url: str
 
 InlineKeyboardButton = Annotated[
-    Union[InlineKeyboardLinkButton],
+    InlineKeyboardLinkButton,
     Field(discriminator='type')
 ]
 
@@ -325,7 +327,7 @@ class InlineKeyboardAttach(BaseAttach):
     buttons: list[list[InlineKeyboardButton]] = Field(validation_alias=AliasPath('keyboard', 'buttons'))
 
 Attach = Annotated[
-    Union[ControlAttach, PhotoAttach, VideoAttach, FileAttach, CallAttach, PollAttach, ShareAttach, InlineKeyboardAttach],
+    ControlAttach | PhotoAttach | VideoAttach | FileAttach | CallAttach | PollAttach | ShareAttach | InlineKeyboardAttach,
     Field(discriminator='type')
 ]
 
@@ -346,8 +348,8 @@ class Message(BaseModel):
     type: str | None = None
     sender: int | None = None
     text: str
-    attaches: List[Attach]
-    reactionInfo: Dict | None = None
+    attaches: list[Attach]
+    reactionInfo: dict | None = None
     link: MessageLink | None = None
 
 class VideoUrls(BaseModel):
@@ -403,7 +405,7 @@ class CallInternalParams(BaseModel):
 class BeginCallResp(BaseModel):
     conversationId: str
     internalCallerParams: Json[CallInternalParams]
-    rejectedParticipants: List[int]
+    rejectedParticipants: list[int]
 
 class QrAuthResp(BaseModel):
     trackId: str
@@ -415,8 +417,13 @@ class QrAuthResp(BaseModel):
 class LoginPasswordChallenge(BaseModel):
     trackId: str
     email: str
-    config: Dict[str, int]
+    config: dict[str, int]
 
 class LoginPasswordResponse(BaseModel):
     token: str = Field(validation_alias=AliasPath('tokenAttrs', 'LOGIN', 'token'))
     profile: ProfileContainer
+
+class QrPollResponse(BaseModel):
+    loginAvailable: bool | None = None
+    expiresAt: MSKTimestamp
+    ttl: int

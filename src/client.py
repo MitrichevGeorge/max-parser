@@ -6,15 +6,19 @@ except RuntimeError:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-import json
 import socket
 import sys
 from crypt import ClientVault, TokenModel, pw_ask
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from operator import itemgetter
 
 from loguru import logger
 from prompt_toolkit.patch_stdout import patch_stdout
+from rich import print
+from rich.console import Group
+from rich.live import Live
+from rich.panel import Panel
+from rich.table import Column, Table
 
 import captcha
 from classes import (
@@ -23,14 +27,22 @@ from classes import (
     ConfigContainer,
     FileAttach,
     IncomingCall,
+    LoginPasswordResponse,
     Message,
+    MessageLinkTypes,
     NewMsgEvent,
     ServerData,
     UserProfile,
     VideoAttach,
 )
 from logserver import LOGS_PORT
-from network_api import LoginNeedPassw, NetworkMixin, ServerError, TrackExpired, WrongPhoneError
+from network_api import (
+    LoginNeedPassw,
+    NetworkMixin,
+    ServerError,
+    TrackExpired,
+    WrongPhoneError,
+)
 from network_core import NetworkCoreMobile, NetworkCoreWS
 from tools import (
     RussianPhoneValidator,
@@ -41,6 +53,7 @@ from tools import (
     ask_str,
     ask_yn,
     bye,
+    check_internet,
     generate_qr,
     sel,
     sel_str,
@@ -136,6 +149,8 @@ class Client(NetworkMixin):
         return ""
 
     async def message_info(self, message: Message, chatId: int, tab: int = 0, ask: bool = True):
+        if message.link and message.link.type == MessageLinkTypes.FORWARD:
+            message = message.link.message
         if message.sender:
             await self.update_missing_users([message.sender])
         indent = "│" * tab
@@ -159,17 +174,22 @@ class Client(NetworkMixin):
         chat.messages = await self.get_messages(chat_id)
         chat.update_messages()
 
-        unique_users = list(set(chat.participants) | {msg.sender for msg in chat.messages if msg.sender})
-        # print(unique_users)
+        unique_users = list(set(chat.participants) | {msg.sender for msg in chat.messages if msg.sender} 
+            | {msg.link.message.sender for msg in chat.messages if msg.link and msg.link.message.sender})
         await self.update_missing_users(unique_users)
-        # print(self.users_by_id)
 
         result: list[tuple[int, str, int]] = []
         for index, message in enumerate(chat.messages):
+            forwarded = False
+            msgId = message.id
+            if message.link and message.link.type == MessageLinkTypes.FORWARD:
+                message = message.link.message
+                forwarded = True
             sender_name = self.users_by_id[message.sender].get_name() if message.sender else "Unknown"
             date_str = message.time.strftime("%d.%m.%Y %H:%M:%S")
-            attach_str = f" [{len(message.attaches)} attaches]" if message.attaches else ""
-            result.append((index, f"[{date_str}] {sender_name}: {message.text}{attach_str}", message.id))
+            # attach_str = f" [{len(message.attaches)} attaches]" if message.attaches else ""
+            attach_str = await self.get_attach_info(message.attaches[0], chat_id, msgId) if message.attaches and message.attaches[0] else ""
+            result.append((index, f"[{date_str}] {"[FORW]" if forwarded else ""} {sender_name}: {message.text}{attach_str}", message.id))
 
         return result
 
@@ -242,33 +262,31 @@ class Tuiclient(Client):
             except ServerError as err:
                 print(err, type(err))
 
-    async def _auth_by_qr(self) -> str: #TODO
-        req = await self.qr_auth_getid()
-        print(f"QR link: {req.qrLink}")
-        print(generate_qr(req.qrLink))
-        print(f"trackId: {req.trackId}")
-        while True:
-            try:
-                result = await self.qr_auth_poll(req.trackId)
-                print("Poll result:")
-                print(json.dumps(result, cls=UniversalEncoder, indent=2, ensure_ascii=False))
-                token_attrs = result.get("tokenAttrs") if isinstance(result, dict) else None
-                if isinstance(token_attrs, dict):
-                    login = token_attrs.get("LOGIN")
-                    new_token = login.get("token") if isinstance(login, dict) else None
-                    if not isinstance(new_token, str):
-                        raise TypeError
-                    if new_token:
-                        print(f"New token: {new_token}")
-                    return new_token
-            except TrackExpired:
-                print("Expired")
-                req = await self.qr_auth_getid()
-                print(f"QR link: {req.qrLink}")
-                print(generate_qr(req.qrLink))
-                print(f"trackId: {req.trackId}")
-            except ServerError as err:
-                print(err, type(err))
+    async def _auth_by_qr(self) -> LoginPasswordResponse:
+        with Live(auto_refresh=False) as live:
+            live.update(Panel("[bold cyan]Getting link...[/bold cyan]", title="QR auth", border_style="bright_blue", padding=(1, 2), expand=False), refresh=True)
+            req = await self.qr_auth_getid()
+            while True:
+                try:
+                    result = await self.qr_auth_poll(req.trackId)
+                    info_table = Table.grid(Column(style="bold cyan", justify="right"), Column(), padding=(0, 1))
+                    info_table.add_row("TTL:", f"[bold green]{timedelta(milliseconds=result.ttl)}[/bold green]")
+                    info_table.add_row("Track ID:", f"[dim]{req.trackId}[/dim]")
+                    content = Group(generate_qr(req.qrLink), "", info_table)
+
+                    live.update(Panel(content, title="QR Auth", subtitle="[dim]Scan with app[/dim]", border_style="bright_blue", padding=(1, 2), expand=False), refresh=True)
+                    if result.loginAvailable:
+                        live.update(Panel("[bold cyan]Success. Getting token...[/bold cyan]", title="QR auth", border_style="bright_blue", padding=(1, 2), expand=False), refresh=True)
+                        return await self.qr_auth_get_token(req.trackId)
+                    await asyncio.sleep(1)
+                except TrackExpired:
+                    live.update(Panel("[bold cyan]Expired. Getting new link...[/bold cyan]", title="QR auth", border_style="bright_blue", padding=(1, 2), expand=False), refresh=True)
+                    req = await self.qr_auth_getid()
+                except ServerError as err:
+                    print(err, type(err))
+                except (KeyboardInterrupt, asyncio.CancelledError):
+                    live.update(Panel("[bold red]Cancelled[/bold red]", title="QR auth", border_style="bright_blue", padding=(1, 2), expand=False), refresh=True)
+                    raise
 
     async def select_account(self) -> None:
         await self.disconnect()
@@ -286,14 +304,17 @@ class Tuiclient(Client):
             selection_idx = await sel(options, "Accounts")
 
             is_existing_token = selection_idx < len(tokens)
-            if is_existing_token:
-                self.token = tokens[selection_idx].token
-            elif options[selection_idx] == "Enter token":
-                self.token = await ask_str("token ->")
-            elif options[selection_idx] == "Auth by number":
-                self.token = await self._auth_by_phone()
-            elif options[selection_idx] == "Auth by QR":
-                self.token = await self._auth_by_qr()
+            try:
+                if is_existing_token:
+                    self.token = tokens[selection_idx].token
+                elif options[selection_idx] == "Enter token":
+                    self.token = await ask_str("token ->")
+                elif options[selection_idx] == "Auth by number":
+                    self.token = await self._auth_by_phone()
+                elif options[selection_idx] == "Auth by QR":
+                    self.token = (await self._auth_by_qr()).token
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                print("[bold gray]Cancelled[/bold gray]")
 
             try:
                 await self.finalise_auth()
@@ -347,7 +368,7 @@ class Tuiclient(Client):
                         await self.message_info(message, chat_id)
                 elif options[select] == "Send message":
                     text: str = await ask_str()
-                    message = await self.send_message(chat_id, text)
+                    message = await self.send_text_message(chat_id, text)
                     msg_list = chat.messages
                     if msg_list:
                         msg_list.append(message)
@@ -371,6 +392,9 @@ class Tuiclient(Client):
                         print(err)
 
     async def begin(self):
+        if not check_internet():
+            print("[bold red]No internet[/bold red]")
+            sys.exit(1)
         self._token_idx = None
         self.on_new_message.connect(self._handle_event)
         self.on_in_call.connect(self._handle_call)
@@ -390,7 +414,7 @@ class Tuiclient(Client):
             user.info()
         if await ask_yn(f"Send message to {user.get_name()}?", default=False, auto_enter=True):
             text = await ask_str("message ->")
-            msg = await self.send_message(user.id, text, False)
+            msg = await self.send_text_message(user.id, text, False)
             await self.message_info(msg, user.id)
 
     async def main_menu(self):
@@ -400,6 +424,7 @@ class Tuiclient(Client):
             match await sel_str(["Profile info", "Contacts", "Chats list", "Limits and config", "User infos", "Swap account", "Account settings", "Logout", "Exit"], "Main menu"):
                 case "Profile info":
                     self.profile.info()
+                    print(generate_qr(self.config.server.invite_link))
                 case "Contacts":
                     print("Contacts:")
                     [i.info(1) for i in self.contacts]
@@ -468,7 +493,7 @@ class Tuiclient(Client):
     async def disconnect(self):
         if self.connection:
             await self.connection.close()
-            print(f"Connection to {self.url} closed")
+            print(f"[gray]Connection to {self.url} closed[/gray]")
         if self._token_idx is not None:
             self.vault.tokens[self._token_idx].last_visit_at = datetime.now()
             self.vault.save()
